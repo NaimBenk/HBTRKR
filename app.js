@@ -1041,6 +1041,72 @@ const forgotPassword = document.getElementById('forgotPassword');
 
 const showAuthModal = () => { authModal.classList.remove('hidden'); authModal.classList.add('flex'); };
 const hideAuthModal = () => { authModal.classList.add('hidden'); authModal.classList.remove('flex'); };
+// === Pretty screenshot toggles (hide desc + buttons) ===
+const monthModalRoot = document.getElementById('modalMonth');
+const yearModalRoot  = document.getElementById('modalYear');
+
+const monthScrBtn = document.getElementById('monthScrBtn');
+const yearScrBtn  = document.getElementById('yearScrBtn');
+
+const closeMonthBtn = document.getElementById('closeMonth');
+const closeYearBtn  = document.getElementById('closeYear');
+
+const monthBackdrop = document.getElementById('monthBackdrop');
+const yearBackdrop  = document.getElementById('yearBackdrop');
+
+const monthDesc = document.getElementById('monthDesc');
+const yearDesc  = document.getElementById('yearDesc');
+
+function setShotUI(active, { root, backdrop, scrBtn, closeBtn, desc }) {
+  if (active) {
+    backdrop.classList.remove('hidden');
+    root.classList.add('modal-screenshot');
+    // cache la description et les boutons
+    desc?.classList.add('hidden');
+    scrBtn?.classList.add('hidden');
+    closeBtn?.classList.add('hidden');
+  } else {
+    backdrop.classList.add('hidden');
+    root.classList.remove('modal-screenshot');
+    // ré-affiche la description et les boutons
+    desc?.classList.remove('hidden');
+    scrBtn?.classList.remove('hidden');
+    closeBtn?.classList.remove('hidden');
+  }
+}
+
+function toggleScreenshot(root, backdrop, scrBtn, closeBtn, desc) {
+  const active = !root.classList.contains('modal-screenshot');
+  setShotUI(active, { root, backdrop, scrBtn, closeBtn, desc });
+}
+
+// Click sur “Scr Sht”
+monthScrBtn?.addEventListener('click', () =>
+  toggleScreenshot(monthModalRoot, monthBackdrop, monthScrBtn, closeMonthBtn, monthDesc)
+);
+yearScrBtn?.addEventListener('click', () =>
+  toggleScreenshot(yearModalRoot, yearBackdrop, yearScrBtn, closeYearBtn, yearDesc)
+);
+
+// Fermeture via bouton → sort du mode screenshot proprement
+closeMonthBtn?.addEventListener('click', () =>
+  setShotUI(false, { root: monthModalRoot, backdrop: monthBackdrop, scrBtn: monthScrBtn, closeBtn: closeMonthBtn, desc: monthDesc })
+);
+closeYearBtn?.addEventListener('click', () =>
+  setShotUI(false, { root: yearModalRoot, backdrop: yearBackdrop, scrBtn: yearScrBtn, closeBtn: closeYearBtn, desc: yearDesc })
+);
+
+// Fermeture en cliquant l’overlay → sort du mode screenshot aussi
+function bindBlobAutoOff(overlayEl, backdropEl, scrBtn, closeBtn, desc) {
+  overlayEl?.addEventListener('click', (e) => {
+    if (e.target === overlayEl) {
+      setShotUI(false, { root: overlayEl, backdrop: backdropEl, scrBtn, closeBtn, desc });
+    }
+  });
+}
+bindBlobAutoOff(monthModalRoot, monthBackdrop, monthScrBtn, closeMonthBtn, monthDesc);
+bindBlobAutoOff(yearModalRoot,  yearBackdrop,  yearScrBtn,  closeYearBtn,  yearDesc);
+
 
 // Utilitaire pour afficher des messages propres à l'utilisateur
 function friendlyAuthError(code) {

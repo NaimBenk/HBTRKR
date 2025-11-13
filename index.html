@@ -19,7 +19,6 @@
   
   <link rel="stylesheet" href="./dist/style.css">
 
-
   <style>
     :root{ --gold:#FFD700; --gold-deep:#C9A227; --bg:#0b0c10; --panel:#0b0c10; --text:#e6eef8; }
     body { background: var(--bg); color: var(--text); }
@@ -42,6 +41,133 @@
 
     .streak-badge{ display:inline-flex; align-items:center; justify-content:center; height:44px; width:7ch; border-radius:999px; font-weight:700; font-size:.9rem; line-height:1; border:0px solid rgba(255,255,255,.18); color: rgba(255,255,255,.9); overflow:hidden; white-space:nowrap; }
     .streak-badge--best{ background: linear-gradient(135deg, var(--gold), var(--gold-deep)); color:#0a0a0a; border-color: rgba(255,215,0,.55); box-shadow: 0 0 18px rgba(255,215,0,.28); }
+  
+  
+      /* === Pretty screenshot backdrop === */
+/* === BACKDROP BLUR BLOBS — new balanced style === */
+.blob-field {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  filter: blur(48px);
+  opacity: 0.9;
+}
+
+/* Nouvelles couleurs plus harmonieuses */
+.blob {
+  position: absolute;
+  border-radius: 9999px;
+  width: 48vmax;
+  height: 48vmax;
+  transform: translate(-50%, -50%);
+  animation: float 20s ease-in-out infinite;
+  will-change: transform;
+}
+
+.blob--gold {
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(255, 223, 94, 0.75),
+    rgba(201, 162, 39, 0.35) 60%,
+    rgba(0, 0, 0, 0) 70%
+  );
+  width: 48vmax;
+  height: 48vmax;
+  border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
+}
+
+.blob--azure {
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(56, 189, 248, 0.55),
+    rgba(37, 99, 235, 0.25) 60%,
+    rgba(0, 0, 0, 0) 70%
+  );
+  width: 52vmax;
+  height: 44vmax;
+  border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+}
+
+.blob--violet {
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(168, 85, 247, 0.45),
+    rgba(99, 102, 241, 0.25) 60%,
+    rgba(0, 0, 0, 0) 70%
+  );
+  width: 46vmax;
+  height: 50vmax;
+  border-radius: 70% 30% 50% 50% / 60% 60% 40% 40%;
+}
+
+.blob--rose {
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(251, 113, 133, 0.55),
+    rgba(244, 63, 94, 0.3) 60%,
+    rgba(0, 0, 0, 0) 70%
+  );
+  width: 50vmax;
+  height: 46vmax;
+  border-radius: 40% 60% 60% 40% / 70% 50% 50% 30%;
+}
+
+.blob--emerald {
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(52, 211, 153, 0.5),
+    rgba(16, 185, 129, 0.28) 60%,
+    rgba(0, 0, 0, 0) 70%
+  );
+  width: 54vmax;
+  height: 42vmax;
+  border-radius: 50% 50% 30% 70% / 40% 60% 40% 60%;
+}
+
+/* animation légèrement plus lente et fluide */
+@keyframes float {
+  0%, 100% {
+    transform: translate(-50%, -50%) translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) translate(4vmax, -3vmax) scale(1.05);
+  }
+}
+
+
+    /* met la carte modale au-dessus des blobs */
+    .modal-card { position: relative; z-index: 10; }
+
+    /* quand on active le mode screenshot, on adoucit l’overlay sombre */
+    .backdrop-soft { background-color: rgba(0,0,0,.20) !important; }
+
+/* --- Mode screenshot : fond noir + bulles --- */
+.modal-screenshot {
+  background: #000 !important; /* masque le reste de la page */
+  overflow: hidden;
+}
+
+/* On renforce les bulles et le contraste */
+.modal-screenshot .blob-field {
+  opacity: 1;
+  filter: blur(40px);
+}
+
+/* La carte reste visible au-dessus */
+.modal-card {
+  position: relative;
+  z-index: 10;
+  transition: opacity .3s ease;
+}
+
+
+  
+  
+  
+  
+  
+  
   </style>
 </head>
 <body class="antialiased min-h-screen">
@@ -209,26 +335,56 @@
   </div>
 
   <div id="modalMonth" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
-    <div class="glass rounded-2xl p-4 w-full max-w-2xl max-h-[85vh] overflow-auto">
+    <!-- Backdrop blobs (caché par défaut) -->
+<div id="monthBackdrop" class="blob-field hidden">
+  <span class="blob blob--gold"   style="top:20%; left:25%;"></span>
+  <span class="blob blob--violet" style="top:60%; left:75%; animation-delay:.3s;"></span>
+  <span class="blob blob--azure"  style="top:80%; left:40%; animation-delay:.6s;"></span>
+</div>
+
+
+    <!-- Carte modale -->
+    <div class="glass rounded-2xl p-4 w-full max-w-2xl max-h-[85vh] overflow-auto modal-card">
       <div class="flex items-center justify-between mb-2">
-        <div class="font-bold" id="monthModalTitle">Mois</div>
-        <button id="closeMonth" class="px-2 py-1 rounded hover:bg-white/5">Fermer</button>
+        <div class="font-bold text-center w-full" id="monthModalTitle">Mois</div>
+        <div class="flex items-center gap-2">
+          <button id="monthScrBtn" class="px-2 py-1 rounded hover:bg-white/5">Scr Sht</button>
+          <button id="closeMonth" class="px-2 py-1 rounded hover:bg-white/5">Fermer</button>
+        </div>
       </div>
-      <p class="text-xs text-white/60 mb-3">Taux de complétion du mois sélectionné et des <span class="font-semibold">2 mois précédents</span>…</p>
+      <p id="monthDesc" class="text-xs text-white/60 mb-3">
+        Taux de complétion du mois sélectionné et des <span class="font-semibold">2 mois précédents</span>…
+      </p>
       <div id="monthSummary" class="space-y-2"></div>
     </div>
   </div>
 
+
   <div id="modalYear" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
-    <div class="glass rounded-2xl p-4 w-full max-w-3xl max-h-[85vh] overflow-auto">
+    <!-- Backdrop blobs (caché par défaut) -->
+<div id="yearBackdrop" class="blob-field hidden">
+  <span class="blob blob--gold"   style="top:15%; left:70%;"></span>
+  <span class="blob blob--violet" style="top:45%; left:25%; animation-delay:.25s;"></span>
+  <span class="blob blob--azure"  style="top:75%; left:60%; animation-delay:.55s;"></span>
+</div>
+
+
+    <!-- Carte modale -->
+    <div class="glass rounded-2xl p-4 w-full max-w-3xl max-h-[85vh] overflow-auto modal-card">
       <div class="flex items-center justify-between mb-2">
-        <div class="font-bold" id="yearModalTitle">Année</div>
-        <button id="closeYear" class="px-2 py-1 rounded hover:bg-white/5">Fermer</button>
+        <div class="font-bold text-center w-full" id="yearModalTitle">Année</div>
+        <div class="flex items-center gap-2">
+          <button id="yearScrBtn" class="px-2 py-1 rounded hover:bg-white/5">Scr Sht</button>
+          <button id="closeYear" class="px-2 py-1 rounded hover:bg-white/5">Fermer</button>
+        </div>
       </div>
-      <p class="text-xs text-white/60 mb-3">Taux de complétion <span class="font-semibold">mensuel</span>…</p>
+      <p  id="yearDesc" class="text-xs text-white/60 mb-3">
+        Taux de complétion <span class="font-semibold">mensuel</span>…
+      </p>
       <div id="yearSummary" class="space-y-3"></div>
     </div>
   </div>
+
 
   <!-- Modal Installation -->
   <div id="modalInstall" class="fixed inset-0 z-60 hidden items-center justify-center bg-black/50 p-4">
