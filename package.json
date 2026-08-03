@@ -1,10 +1,11 @@
 {
   "name": "hbtrk",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Calendrier annuel pour suivre ses habitudes et organiser ses tâches quotidiennes.",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "node scripts/serve.mjs",
+    "check": "node --check app.js && npm run build:css",
     "build:css": "npx @tailwindcss/cli -i ./src/input.css -o ./dist/style.css --minify"
   },
   "repository": {

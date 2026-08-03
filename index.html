@@ -2,7 +2,8 @@
 <html lang="fr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="HBTRK réunit habitudes, tâches quotidiennes et bilans dans un calendrier annuel clair.">
 
   <title>HBTRK</title>
 
@@ -11,17 +12,44 @@
 
   <!-- Icône iOS écran d'accueil -->
   <link rel="apple-touch-icon" href="/ico.png">
+  <link rel="manifest" href="./manifest.webmanifest">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="HBTRK">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#080808">
   
-  <link rel="stylesheet" href="./dist/style.css">
+  <link rel="stylesheet" href="./dist/style.css?v=20260803-9">
 
   <style>
-    :root{ --gold:#FFD700; --gold-deep:#C9A227; --bg:#0b0c10; --panel:#0b0c10; --text:#e6eef8; }
-    body { background: var(--bg); color: var(--text); }
+    :root{
+      color-scheme: dark;
+      --gold:#FFD700;
+      --gold-deep:#C9A227;
+      --green:#31d874;
+      --green-soft:#68ef9c;
+      --task-later:#f97316;
+      --task-later-deep:#ea580c;
+      --task-later-border:#fb923c;
+      --task-later-ink:#2a0c02;
+      --bg:#0b0c10;
+      --panel:#111318;
+      --panel-soft:rgba(255,255,255,.055);
+      --border:rgba(255,255,255,.1);
+      --text:#e6eef8;
+      --muted:rgba(230,238,248,.58);
+    }
+    html { background: var(--bg); }
+    body {
+      min-height: 100dvh;
+      background:
+        radial-gradient(circle at 15% -10%, rgba(49,216,116,.07), transparent 28rem),
+        radial-gradient(circle at 90% 0%, rgba(255,215,0,.045), transparent 24rem),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overscroll-behavior-y: none;
+    }
     .month-grid { grid-template-columns: repeat(3, minmax(0,1fr)); }
     .day-cell { width: 1.6rem; height: 1.6rem; display:flex;align-items:center;justify-content:center;border-radius:.35rem; transition: background-color 0.2s, transform .12s; }
     .day-cell:hover { transform: translateY(-2px); }
@@ -161,6 +189,451 @@
   transition: opacity .3s ease;
 }
 
+/* === Interface 2026 : vues, calendrier compact et exports === */
+button, input, a { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, input:focus-visible, a:focus-visible {
+  outline: 2px solid rgba(255, 215, 0, .9);
+  outline-offset: 2px;
+}
+.app-header {
+  padding-top: env(safe-area-inset-top);
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  background: linear-gradient(180deg, rgba(11,12,16,.96), rgba(11,12,16,.78));
+  box-shadow: 0 10px 28px rgba(0,0,0,.18);
+  backdrop-filter: blur(18px) saturate(1.15);
+  -webkit-backdrop-filter: blur(18px) saturate(1.15);
+}
+.app-header-inner { min-height: 3.25rem; }
+.app-logo { padding: .3rem .1rem; color: #fff; letter-spacing: .055em; transition: color .18s ease, opacity .18s ease; }
+.app-logo:hover { color: var(--green-soft); }
+.app-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.25rem;
+  padding: .48rem .8rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255,255,255,.065);
+  color: rgba(255,255,255,.86);
+  font-size: .75rem;
+  font-weight: 750;
+}
+.app-button:hover { border-color: rgba(255,255,255,.2); background: rgba(255,255,255,.11); color:#fff; }
+.app-button.hidden { display: none; }
+.app-button--primary { border-color: rgba(104,239,156,.42); background: var(--green); color:#06150b; }
+.app-button--primary:hover { border-color: var(--green-soft); background:#46e384; color:#041009; }
+.app-button--ghost { background: transparent; border-color: transparent; }
+.app-button--compact { min-height: 2rem; padding: .35rem .7rem; }
+.app-button--icon { width: 2.1rem; height: 2.1rem; padding: 0; font-size: 1rem; }
+.app-button:disabled { cursor: not-allowed; opacity: .5; }
+.app-input {
+  color: #fff;
+  background: rgba(255,255,255,.065) !important;
+  border-color: rgba(255,255,255,.11) !important;
+  transition: border-color .18s ease, background .18s ease, box-shadow .18s ease;
+}
+.app-input:hover { border-color: rgba(255,255,255,.2) !important; }
+.app-input:focus { border-color: rgba(49,216,116,.62) !important; box-shadow: 0 0 0 3px rgba(49,216,116,.11); }
+.app-input:focus-visible { outline: none; }
+.app-input::placeholder { color: rgba(255,255,255,.34); }
+.modal-form-card { background: linear-gradient(160deg, rgba(22,25,31,.97), rgba(10,12,16,.96)); }
+.frequency-card { cursor: pointer; transition: border-color .18s ease, background .18s ease, box-shadow .18s ease; }
+.frequency-card:hover { border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.07); }
+.frequency-card.is-selected { border-color: rgba(49,216,116,.42); background: rgba(49,216,116,.075); box-shadow: inset 0 0 0 1px rgba(49,216,116,.05); }
+.dayToggle { min-width: 2rem; border: 1px solid transparent; }
+.nav-action {
+  display: block;
+  width: 100%;
+  padding: .62rem .75rem;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: .7rem;
+  background: rgba(255,255,255,.045);
+  color: rgba(255,255,255,.82);
+  text-align: left;
+  font-size: .78rem;
+  transition: border-color .16s ease, background .16s ease, color .16s ease;
+}
+.nav-action:hover { border-color: rgba(255,255,255,.18); background: rgba(255,255,255,.085); color:#fff; }
+.nav-action--danger { color: rgba(254,202,202,.82); }
+.nav-action--danger:hover { border-color: rgba(239,68,68,.28); background: rgba(239,68,68,.09); color:#fecaca; }
+body:has([aria-modal="true"].flex) { overflow: hidden; }
+
+.summary-action, .compact-add-task {
+  border: 1px solid rgba(255,255,255,.12);
+  background: rgba(255,255,255,.06);
+  transition: background .18s ease, transform .12s ease, border-color .18s ease;
+}
+.summary-action:hover, .compact-add-task:hover { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); }
+.summary-action:active, .compact-add-task:active { transform: scale(.97); }
+.compact-month-card {
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 1rem;
+  background: linear-gradient(160deg, rgba(255,255,255,.065), rgba(255,255,255,.025));
+  box-shadow: 0 10px 30px rgba(0,0,0,.14);
+}
+.compact-month-card.is-expanded { grid-column: 1 / -1; border-color: rgba(49,216,116,.3); }
+.year-block { border-radius: 1.5rem; }
+.year-title { margin: 0 0 .8rem; }
+.year-title-button {
+  padding: .18rem .35rem;
+  border-radius: .55rem;
+  color: #fff;
+  font-size: clamp(1.55rem, 3vw, 2rem);
+  font-weight: 900;
+  letter-spacing: -.045em;
+  line-height: 1;
+}
+.year-title-button:hover { color: var(--green-soft); background: rgba(49,216,116,.065); }
+.month-task-card {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.075);
+  background: linear-gradient(155deg, rgba(255,255,255,.055), rgba(255,255,255,.022));
+  box-shadow: 0 8px 24px rgba(0,0,0,.13);
+  transition: border-color .2s ease, background .2s ease, box-shadow .2s ease, transform .2s ease;
+}
+.month-task-card:hover { border-color: rgba(255,255,255,.14); background: linear-gradient(155deg, rgba(255,255,255,.07), rgba(255,255,255,.028)); }
+.month-task-card.is-current-month:not(.is-expanded) { border-color: rgba(255,215,0,.34); box-shadow: 0 10px 28px rgba(0,0,0,.18), inset 0 0 0 1px rgba(255,215,0,.055); }
+.month-task-card.is-expanded {
+  grid-column: 1 / -1;
+  border: 1px solid rgba(49,216,116,.28);
+  background: linear-gradient(160deg, rgba(255,255,255,.065), rgba(255,255,255,.025));
+  box-shadow: 0 14px 34px rgba(0,0,0,.2);
+}
+.month-title-row { display: flex; align-items: center; justify-content: space-between; gap: .55rem; margin-bottom: .65rem; }
+.month-name-button {
+  min-width: 2.2rem;
+  padding: .3rem .36rem;
+  border-radius: .5rem;
+  color: rgba(255,255,255,.9);
+  font-size: .8rem;
+  font-weight: 850;
+  text-align: left;
+}
+.month-name-button:hover { color:#fff; background: rgba(255,255,255,.07); }
+.month-mode-toggle {
+  flex: 0 0 auto;
+  padding: .12rem;
+  box-shadow: inset 0 1px rgba(255,255,255,.025);
+}
+.month-mode-option { min-width: 3.35rem; padding: .29rem .46rem; font-size: .58rem; }
+.compact-month-meta { color: rgba(255,255,255,.5); font-size: .7rem; margin-top: .15rem; }
+.compact-calendar-wrap { padding: 0 .8rem .8rem; overflow-x: auto; }
+.compact-calendar { min-width: 790px; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: .35rem; }
+.compact-weekday { padding: .4rem; color: rgba(255,255,255,.46); text-align: center; font-size: .65rem; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; }
+.compact-day {
+  min-height: 8.5rem;
+  padding: .45rem;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: .7rem;
+  background: rgba(0,0,0,.2);
+}
+.compact-day.is-today { border-color: rgba(255,215,0,.65); box-shadow: inset 0 0 0 1px rgba(255,215,0,.2); }
+.compact-day.is-outside { min-height: 0; border-color: transparent; background: transparent; }
+.compact-day-head { display: flex; align-items: center; justify-content: space-between; gap: .35rem; margin-bottom: .42rem; }
+.compact-day-number { font-size: .72rem; font-weight: 850; }
+.compact-day-rate { color: rgba(255,255,255,.45); font-size: .6rem; }
+.compact-task-list { display: grid; gap: .28rem; }
+.compact-task-row { display: flex; align-items: stretch; gap: .25rem; min-width: 0; }
+.compact-task {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: .34rem .42rem;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: .45rem;
+  background: rgba(255,255,255,.055);
+  color: rgba(255,255,255,.84);
+  font-size: .64rem;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background .15s ease, color .15s ease, border-color .15s ease, transform .1s ease;
+}
+.compact-task:hover { transform: translateY(-1px); border-color: rgba(255,255,255,.2); }
+.compact-task[data-status="done"] { background: rgba(49,216,116,.92); border-color: #68ef9c; color: #04150a; }
+.compact-task[data-status="later"] { background: linear-gradient(135deg, rgba(249,115,22,.96), rgba(234,88,12,.94)); border-color: var(--task-later-border); color: var(--task-later-ink); }
+.compact-task[data-status="skipped"] { background: rgba(240,82,82,.9); border-color: #ff8d8d; color: #210606; }
+.compact-add-task { width: 100%; margin-top: .32rem; padding: .28rem .4rem; border-radius: .45rem; color: rgba(255,255,255,.5); font-size: .6rem; text-align: left; }
+.compact-empty { grid-column: 1 / -1; padding: 4rem 1.5rem; color: rgba(255,255,255,.52); text-align: center; border: 1px dashed rgba(255,255,255,.14); border-radius: 1rem; }
+
+.mobile-day-mode { display: flex; justify-content: center; margin: .75rem 0 .35rem; }
+.mobile-mode-toggle {
+  display: inline-flex;
+  padding: .2rem;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 999px;
+  background: rgba(255,255,255,.045);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 8px 24px rgba(0,0,0,.16);
+}
+.mobile-mode-option {
+  min-width: 5.7rem;
+  padding: .42rem .72rem;
+  border-radius: 999px;
+  color: rgba(255,255,255,.52);
+  font-size: .7rem;
+  font-weight: 800;
+  transition: color .16s ease, background .16s ease, box-shadow .16s ease;
+}
+.mobile-mode-option:hover { color: rgba(255,255,255,.86); background: rgba(255,255,255,.055); }
+.mobile-mode-option[aria-pressed="true"] { color: #07150c; background: #31d874; box-shadow: 0 3px 12px rgba(49,216,116,.22); }
+.mobile-mode-option[aria-pressed="true"]:hover { color:#07150c; background:#3edf7d; }
+.mobile-task-button[data-status="done"] { color: #04150a; background: rgba(49,216,116,.92); border-color: #68ef9c; }
+.mobile-task-button[data-status="later"] { color: var(--task-later-ink); background: linear-gradient(135deg, rgba(249,115,22,.96), rgba(234,88,12,.94)); border-color: var(--task-later-border); }
+.mobile-task-button[data-status="skipped"] { color: #210606; background: rgba(240,82,82,.9); border-color: #ff8d8d; }
+.mobile-landscape-lock #appTitle { color: var(--gold); text-shadow: 0 0 14px rgba(255,215,0,.32); }
+
+.compact-day[data-day-color="green"] { background: linear-gradient(145deg, rgba(49,216,116,.2), rgba(0,0,0,.24)); border-color: rgba(104,239,156,.36); }
+.compact-day[data-day-color="blue"] { background: linear-gradient(145deg, rgba(59,130,246,.22), rgba(0,0,0,.24)); border-color: rgba(96,165,250,.4); }
+.compact-day[data-day-color="purple"] { background: linear-gradient(145deg, rgba(168,85,247,.22), rgba(0,0,0,.24)); border-color: rgba(192,132,252,.4); }
+.compact-day[data-day-color="orange"] { background: linear-gradient(145deg, rgba(245,165,36,.22), rgba(0,0,0,.24)); border-color: rgba(251,191,36,.4); }
+.compact-day[data-day-color="red"] { background: linear-gradient(145deg, rgba(240,82,82,.22), rgba(0,0,0,.24)); border-color: rgba(248,113,113,.4); }
+.compact-day[data-day-color="gray"] { background: linear-gradient(145deg, rgba(148,163,184,.18), rgba(0,0,0,.3)); border-color: rgba(148,163,184,.3); }
+.compact-day.is-past:not(.is-outside) { filter: saturate(.4) brightness(.68); opacity: .84; }
+.compact-day-head-tools { display: inline-flex; align-items: center; gap: .3rem; }
+.compact-day-color,
+.mobile-day-color {
+  color: rgba(255,255,255,.42);
+  line-height: 1;
+  text-shadow: 0 0 9px currentColor;
+  transition: color .15s ease, transform .15s ease;
+}
+.compact-day-color { width: 1rem; height: 1rem; font-size: .72rem; }
+.compact-day-color:hover,
+.mobile-day-color:hover { transform: scale(1.16); }
+.compact-day-color[data-day-color="green"], .mobile-day-color[data-day-color="green"] { color: #31d874; }
+.compact-day-color[data-day-color="blue"], .mobile-day-color[data-day-color="blue"] { color: #60a5fa; }
+.compact-day-color[data-day-color="purple"], .mobile-day-color[data-day-color="purple"] { color: #c084fc; }
+.compact-day-color[data-day-color="orange"], .mobile-day-color[data-day-color="orange"] { color: #fbbf24; }
+.compact-day-color[data-day-color="red"], .mobile-day-color[data-day-color="red"] { color: #f87171; }
+.compact-day-color[data-day-color="gray"], .mobile-day-color[data-day-color="gray"] { color: #94a3b8; }
+.day-color-picker {
+  position: fixed;
+  z-index: 140;
+  display: flex;
+  align-items: center;
+  gap: .24rem;
+  width: max-content;
+  padding: .34rem;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 999px;
+  background: rgba(13,15,19,.96);
+  box-shadow: 0 10px 30px rgba(0,0,0,.48), inset 0 1px rgba(255,255,255,.04);
+  backdrop-filter: blur(14px);
+  animation: color-picker-in .14s cubic-bezier(.2,.8,.2,1) both;
+}
+.day-color-option {
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 2px solid rgba(255,255,255,.15);
+  border-radius: 999px;
+  background: #3d434e;
+  box-shadow: inset 0 0 0 2px rgba(0,0,0,.22);
+}
+.day-color-option[data-color="default"] { background: #343941; }
+.day-color-option[data-color="green"] { background: #31d874; }
+.day-color-option[data-color="blue"] { background: #60a5fa; }
+.day-color-option[data-color="purple"] { background: #c084fc; }
+.day-color-option[data-color="orange"] { background: #fbbf24; }
+.day-color-option[data-color="red"] { background: #f87171; }
+.day-color-option[data-color="gray"] { background: #94a3b8; }
+.day-color-option:hover,
+.day-color-option:focus-visible { transform: scale(1.14); outline: none; border-color: #fff; }
+.day-color-option.is-selected { border-color: #fff; box-shadow: 0 0 0 2px rgba(49,216,116,.72), inset 0 0 0 2px rgba(0,0,0,.24); }
+@keyframes color-picker-in { from { opacity: 0; transform: translateY(-.2rem) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+.compact-task-row { display: grid; gap: .18rem; }
+.compact-task-row.is-important .compact-task { border-color: rgba(255,215,0,.55); box-shadow: inset 0 0 0 1px rgba(255,215,0,.09); }
+
+.mobile-day-subline { display: flex; align-items: center; justify-content: center; gap: .55rem; }
+.day-bottom-nav { padding-bottom: max(1rem, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, rgba(11,12,16,.78)); pointer-events: none; }
+.day-bottom-nav > div { pointer-events: auto; }
+.mobile-day-color { display: none; width: 1.6rem; height: 1.6rem; font-size: 1rem; }
+.mobile-task-button.is-important { border-color: rgba(255,215,0,.62); box-shadow: 0 0 0 1px rgba(255,215,0,.14), 0 8px 22px rgba(255,215,0,.08); }
+#dayPage[data-day-color="green"] { background: radial-gradient(circle at 50% 20%, rgba(49,216,116,.16), transparent 48%); }
+#dayPage[data-day-color="blue"] { background: radial-gradient(circle at 50% 20%, rgba(59,130,246,.17), transparent 48%); }
+#dayPage[data-day-color="purple"] { background: radial-gradient(circle at 50% 20%, rgba(168,85,247,.17), transparent 48%); }
+#dayPage[data-day-color="orange"] { background: radial-gradient(circle at 50% 20%, rgba(245,165,36,.17), transparent 48%); }
+#dayPage[data-day-color="red"] { background: radial-gradient(circle at 50% 20%, rgba(240,82,82,.17), transparent 48%); }
+#dayPage[data-day-color="gray"] { background: radial-gradient(circle at 50% 20%, rgba(148,163,184,.13), transparent 48%); }
+#dayPage.is-past-day #dayHabitsList { filter: saturate(.42) brightness(.68); opacity: .8; }
+
+html { scroll-behavior: smooth; }
+#homePage { overflow: visible; }
+.day-panel { width: min(48rem, calc(100vw - 2rem)); }
+.day-cell:focus-visible { outline-offset: 1px; }
+.day-cell[aria-current="date"] { font-weight: 900; }
+button, [role="button"] { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+button { transition-property: color, background-color, border-color, opacity, box-shadow, transform, filter; transition-duration: .18s; transition-timing-function: cubic-bezier(.2,.8,.2,1); }
+button:active:not(:disabled) { transform: scale(.97); }
+
+.month-task-card.is-expanded { width: min(96vw, 1500px); max-width: none; justify-self: center; overflow: visible; animation: month-expand .34s cubic-bezier(.2,.8,.2,1) both; }
+.month-task-card.is-expanded .compact-calendar-wrap { padding-inline: 1rem; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
+.month-task-card.is-expanded .compact-calendar { min-width: 1080px; gap: .55rem; }
+.month-task-card.is-expanded .compact-day { min-height: 10rem; padding: .58rem; }
+
+.compact-task { min-height: 2rem; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.compact-task-row { position: relative; animation: task-enter .22s cubic-bezier(.2,.8,.2,1) both; }
+.mobile-task-main { position: relative; display: grid; grid-template-columns: minmax(0,1fr); align-items: stretch; gap: .3rem; width: 80%; min-width: 0; }
+.mobile-task-main .mobile-task-button { width: 100%; }
+.mobile-task-button,
+.mobile-add-task-button {
+  height: auto;
+  min-height: 3.55rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.28;
+  text-align: center;
+}
+.mobile-task-button { display: flex; align-items: center; justify-content: center; gap: .45rem; }
+.mobile-task-button { border-radius: 1.75rem; }
+.mobile-add-task-button { display: grid; place-items: center; margin-top: .35rem; border-style: dashed; color: rgba(255,255,255,.72); }
+.mobile-add-task-button:hover { color: #fff; border-color: rgba(49,216,116,.5); background: rgba(49,216,116,.09); }
+.mobile-task-empty { padding: 1rem 0 .25rem; }
+.task-important-mark { flex: 0 0 auto; color: #ffd700; font-size: .9em; text-shadow: 0 0 10px rgba(255,215,0,.34); }
+.task-rollover-mark { flex: 0 0 auto; color: currentColor; font-size: .8em; opacity: .58; }
+.compact-task .task-important-mark,
+.compact-task .task-rollover-mark { margin-right: .28rem; }
+.task-name { min-width: 0; }
+#dayPage:not(.hidden) { animation: page-enter .28s cubic-bezier(.2,.8,.2,1) both; }
+#dayHabitsList > * { animation: task-enter .24s cubic-bezier(.2,.8,.2,1) both; }
+.day-cell:hover { transform: translateY(-1px); }
+.day-cell:active { transform: scale(.9); }
+.modal-card { animation: modal-enter .26s cubic-bezier(.2,.8,.2,1) both; }
+
+@keyframes month-expand { from { opacity: .65; transform: scale(.985); } to { opacity: 1; transform: scale(1); } }
+@keyframes task-enter { from { opacity: 0; transform: translateY(.35rem); } to { opacity: 1; transform: translateY(0); } }
+@keyframes page-enter { from { opacity: 0; transform: translateY(.45rem); } to { opacity: 1; transform: translateY(0); } }
+@keyframes modal-enter { from { opacity: 0; transform: translateY(.7rem) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+.compact-task-row { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: stretch; isolation: isolate; }
+.task-drag-handle {
+  display: grid;
+  place-items: center;
+  width: 1.55rem;
+  min-height: 2rem;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: .45rem;
+  background: rgba(255,255,255,.045);
+  color: rgba(255,255,255,.48);
+  font-size: .78rem;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.task-drag-handle:hover,
+.task-drag-handle:focus-visible { color: #fff; border-color: rgba(49,216,116,.38); background: rgba(49,216,116,.11); }
+.task-drag-handle:active { cursor: grabbing; }
+.task-swipe-shell,
+.mobile-task-main {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: .7rem;
+}
+.task-swipe-shell { display: grid; border-radius: .45rem; }
+.compact-task { width: 100%; touch-action: pan-y; }
+.mobile-task-main { border-radius: 1.75rem; }
+.compact-task,
+.mobile-task-button,
+.mobile-task-separator,
+.task-separator-delete { position: relative; z-index: 1; }
+.compact-task,
+.mobile-task-button,
+.mobile-task-separator { transition: transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .18s ease, opacity .18s ease; }
+.task-swipe-shell::before,
+.mobile-task-main::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  border-radius: inherit;
+  color: #fff;
+  font-size: .68rem;
+  font-weight: 850;
+  letter-spacing: .02em;
+  opacity: 0;
+  transition: opacity .15s ease;
+  pointer-events: none;
+}
+.task-swipe-shell[data-swipe-direction="delete"]::before,
+.mobile-task-main[data-swipe-direction="delete"]::before { content: attr(data-swipe-label); justify-content: flex-start; padding-left: .65rem; background: linear-gradient(90deg, rgba(239,68,68,.96), rgba(185,28,28,.78)); opacity: 1; }
+.task-swipe-shell[data-swipe-direction="flag"]::before,
+.mobile-task-main[data-swipe-direction="flag"]::before { content: attr(data-swipe-label); justify-content: flex-end; padding-right: .65rem; background: linear-gradient(270deg, rgba(245,165,36,.96), rgba(180,83,9,.78)); opacity: 1; }
+.compact-task-row.is-dragging,
+.mobile-task-row.is-dragging { z-index: 20; opacity: .78; transform: scale(1.018); filter: drop-shadow(0 12px 18px rgba(0,0,0,.34)); }
+.compact-task-row.is-dragging .task-drag-handle { color: #07150c; border-color: #68ef9c; background: #31d874; }
+.task-separator-row { grid-template-columns: auto minmax(0,1fr) auto; align-items: center; animation: separator-enter .2s ease both; }
+.task-separator-line { display: flex; align-items: center; gap: .45rem; min-height: 1.4rem; color: rgba(255,255,255,.34); font-size: .54rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.task-separator-line::before,
+.task-separator-line::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(147,197,253,.42)); }
+.task-separator-line::after { background: linear-gradient(90deg, rgba(147,197,253,.42), transparent); }
+.task-separator-delete {
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 999px;
+  color: rgba(255,255,255,.42);
+  font-size: .9rem;
+}
+.task-separator-delete:hover { color: #fecaca; border-color: rgba(239,68,68,.34); background: rgba(239,68,68,.11); }
+.mobile-task-row { position: relative; isolation: isolate; }
+.mobile-task-button,
+.mobile-task-separator { touch-action: none; user-select: none; -webkit-user-select: none; }
+.mobile-task-row.is-dragging .mobile-task-main { box-shadow: 0 0 0 2px rgba(49,216,116,.3); }
+.task-separator-main { grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: .55rem; }
+.mobile-task-separator { display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 2.4rem; color: rgba(255,255,255,.42); font-size: .62rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
+.mobile-task-separator span { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(147,197,253,.5)); }
+.mobile-task-separator span:last-child { background: linear-gradient(90deg, rgba(147,197,253,.5), transparent); }
+.mobile-task-gesture-hint { width: 80%; padding: .1rem .3rem .3rem; color: rgba(255,255,255,.38); font-size: .62rem; line-height: 1.4; text-align: center; }
+@keyframes separator-enter { from { opacity: 0; transform: scaleX(.92); } to { opacity: 1; transform: scaleX(1); } }
+
+.summary-card { background: rgba(8,9,12,.88); }
+.summary-header { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 1rem; }
+.summary-title { min-width: 0; font-size: 1rem; letter-spacing: -.015em; }
+.summary-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: .4rem; flex-wrap: wrap; }
+.summary-action { min-height: 2rem; padding: .38rem .7rem; border-radius: 999px; font-size: .7rem; font-weight: 750; white-space: nowrap; }
+.summary-action--primary { background: #31d874; border-color: #68ef9c; color: #04150a; }
+.summary-action--primary:hover { background: #4ae489; }
+.summary-action[aria-pressed="true"] { background: linear-gradient(135deg, var(--gold), var(--gold-deep)); color: #0a0a0a; border-color: rgba(255,215,0,.65); }
+.exporting .no-export { display: none !important; }
+.exporting .modal-card { max-height: none !important; overflow: visible !important; }
+.exporting { width: 1200px !important; min-height: 800px !important; position: fixed !important; inset: auto !important; left: -20000px !important; top: 0 !important; display: flex !important; }
+.toast-stack { position: fixed; z-index: 120; right: 1rem; bottom: max(1rem, env(safe-area-inset-bottom)); display: grid; gap: .5rem; pointer-events: none; }
+.app-toast { max-width: 22rem; padding: .75rem 1rem; border: 1px solid rgba(255,255,255,.12); border-radius: .75rem; background: rgba(18,20,25,.96); box-shadow: 0 14px 40px rgba(0,0,0,.4); color: #fff; font-size: .78rem; animation: toast-in .2s ease-out; }
+.app-toast--error { border-color: rgba(240,82,82,.55); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(.5rem); } }
+
+@media (max-width: 900px) {
+  .month-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+}
+@media (max-width: 639px) {
+  .app-header-inner { min-height: 3.1rem; }
+  #homePage { padding-top: calc(5rem + env(safe-area-inset-top)); }
+  #dayPage { padding-top: calc(5rem + env(safe-area-inset-top)); }
+  .mobile-day-color { display: inline-grid; place-items: center; }
+  .modal-card { padding: .9rem; }
+  .summary-header { grid-template-columns: 1fr; gap: .7rem; }
+  .summary-title { text-align: center; }
+  .summary-toolbar { justify-content: center; width: 100%; }
+  .app-toast { max-width: calc(100vw - 2rem); }
+  .toast-stack { left: 1rem; right: 1rem; bottom: max(5.75rem, calc(4.75rem + env(safe-area-inset-bottom))); justify-items: center; }
+}
+.mobile-landscape-lock .mobile-day-color { display: inline-grid; place-items: center; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
 
   
   
@@ -171,14 +644,14 @@
   </style>
 </head>
 <body class="antialiased min-h-screen">
-  <header class="fixed top-0 left-0 right-0 z-40 backdrop-blur-md bg-gradient-to-b from-black/40 to-transparent border-b border-white/5">
-    <div class="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+  <header class="app-header fixed top-0 left-0 right-0 z-40">
+    <div class="app-header-inner max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center gap-2 sm:gap-4">
-        <button id="appTitle" class="text-lg font-extrabold tracking-wide hover:opacity-80">HBTRK</button>
+        <button id="appTitle" class="app-logo text-lg font-extrabold tracking-wide" aria-label="HBTRK — revenir à l’accueil">HBTRK</button>
       </div>
       <div class="flex items-center gap-3">
-        <button id="addHabitBtn" class="text-sm bg-white/10 px-3 py-1 rounded-full hover:bg-white/15">+ Habitude</button>
-        <button id="burgerBtn" aria-label="Menu"
+        <button id="addHabitBtn" class="app-button app-button--compact">+ Habitude</button>
+        <button id="burgerBtn" aria-label="Menu" aria-expanded="false" aria-controls="navPanel"
                 class="h-7 w-12 grid place-items-center rounded-full bg-white/10 hover:bg-white/15 border border-white/10 transition active:scale-95">
           <svg id="burgerIcon" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -191,33 +664,44 @@
     </div>
   </header>
 
-  <main id="homePage" class="pt-20 pb-24 max-w-5xl mx-auto px-4 space-y-10 overflow-auto" style="scroll-behavior: smooth;"></main>
+  <main id="homePage" class="pt-20 pb-24 max-w-5xl mx-auto px-4 space-y-10 overflow-auto" aria-label="Calendrier annuel" style="scroll-behavior: smooth;">
+    <div id="appLoading" class="py-24 text-center text-sm text-white/50">Chargement de votre calendrier…</div>
+  </main>
 
   <div id="dayOverlay" class="hidden fixed inset-0 z-40 bg-black/30"></div>
 
   <div id="dayPanel"
-    class="hidden md:block fixed right-4 top-20 z-50 w-192 max-w-full glass rounded-2xl shadow-2xl p-4 transition-transform duration-300 overflow-y-auto will-change-transform"
+    class="day-panel hidden md:block fixed right-4 top-20 z-50 glass rounded-2xl shadow-2xl p-4 transition-transform duration-300 overflow-y-auto will-change-transform"
+    role="dialog" aria-modal="true" aria-label="Habitudes du jour" aria-hidden="true"
     style="max-height: calc(100vh - 6rem); transform: translateX(calc(100% + 1rem)); visibility: hidden;">
     <div class="flex items-start justify-between mb-3">
       <div>
         <div id="panelDate" class="text-sm font-semibold">Jour</div>
         <div id="panelDateLong" class="text-xs text-white/60">date</div>
       </div>
-      <button id="closePanel" class="hidden text-sm px-2 py-1 rounded hover:bg-white/5">Fermer</button>
+      <button id="closePanel" class="app-button app-button--ghost app-button--compact" aria-label="Fermer les habitudes du jour">Fermer</button>
     </div>
     <div id="habitsList" class="space-y-3 max-h-144 overflow-auto pb-2"></div>
   </div>
 
   <section id="dayPage" class="hidden pt-20 pb-32 max-w-2xl mx-auto px-4 min-h-screen flex flex-col">
-    <div class="text-center mb-4">
-      <div id="dayTitle" class="text-5xl font-extrabold pt-16 pb-4"></div>
-      <div id="dayTitleSub" class="text-sm text-white/60"></div>
+    <div class="mobile-day-mode">
+      <div id="mobileDayModeToggle" class="mobile-mode-toggle" role="group" aria-label="Contenu du jour">
+        <button id="mobileHabitsMode" type="button" class="mobile-mode-option" aria-pressed="true">Habits</button>
+        <button id="mobileTasksMode" type="button" class="mobile-mode-option" aria-pressed="false">Tasks</button>
+      </div>
     </div>
-    <div id="dayContent" class="flex-1"></div>
+    <div class="text-center mb-4">
+      <div id="dayTitle" class="text-5xl font-extrabold pt-10 pb-4"></div>
+      <div class="mobile-day-subline">
+        <div id="dayTitleSub" class="text-sm text-white/60"></div>
+        <button id="mobileDayColor" type="button" class="mobile-day-color" aria-label="Changer la couleur du jour">●</button>
+      </div>
+    </div>
     <div id="dayHabitsList" class="mb-4 space-y-3 flex flex-col items-center"></div>
     
     <!-- Barre de navigation fixée en bas -->
-    <div class="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-center py-4">
+    <div class="day-bottom-nav fixed bottom-0 left-0 right-0 z-50 flex items-center justify-center py-4">
       <div class="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 backdrop-blur px-1.5 py-1 shadow-lg">
         <button id="prevDay" aria-label="Jour précédent" class="h-11 w-11 sm:h-10 sm:w-10 grid place-items-center rounded-full hover:bg-white/10 active:scale-95 transition focus:outline-none focus:ring-2 focus:ring-white/20">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -234,19 +718,20 @@
   </section>
 
   <!-- Modal Add Habit avec fréquence -->
-  <div id="modalAddHabit" class="fixed inset-0 z-60 hidden items-center justify-center bg-black/50" role="dialog" aria-modal="true">
-    <div class="glass rounded-xl p-4 w-96 shadow-2xl">
-      <h3 class="font-semibold mb-2">Ajouter une habitude</h3>
+  <div id="modalAddHabit" class="fixed inset-0 z-60 hidden items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="addHabitTitle">
+    <form id="addHabitForm" class="glass modal-form-card rounded-2xl p-5 w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto shadow-2xl" novalidate>
+      <h3 id="addHabitTitle" class="font-extrabold text-lg mb-3">Ajouter une habitude</h3>
 
       <!-- Nom -->
+      <label for="habitNameInput" class="block text-xs text-white/60 mb-1">Nom</label>
       <input id="habitNameInput"
-        class="w-full py-2 px-4 rounded-full bg-white/10 border border-white/10 mb-2"
-        placeholder="Nom de l'Habitude"/>
+        class="app-input w-full py-2.5 px-4 rounded-xl bg-white/10 border border-white/10 mb-3"
+        placeholder="Nom de l'Habitude" enterkeyhint="done"/>
 
       <!-- Date de début -->
-      <label class="block text-xs text-white/60 mb-2">Active à partir de :</label>
+      <label for="habitStartInput" class="block text-xs text-white/60 mb-1">Active à partir de</label>
       <input id="habitStartInput" type="date"
-        class="w-full py-2 px-4 rounded-full bg-white/10 border border-white/10 mb-4" />
+        class="app-input w-full py-2.5 px-4 rounded-xl bg-white/10 border border-white/10 mb-4" />
 
       <!-- Fréquence -->
       <div class="mb-4">
@@ -254,21 +739,21 @@
 
         <!-- MODE A : Hebdomadaire -->
         <div id="freqWeeklyBlock"
-          class="mb-3 p-3 rounded-lg border border-white/10 bg-white/5">
+          class="frequency-card mb-3 p-3 rounded-xl border border-white/10 bg-white/5">
           <div class="flex items-center justify-between mb-2">
             <div class="text-sm font-semibold">Hebdomadaire</div>
             <input id="freqWeeklyRadio" type="radio" name="freqMode" value="weekly"
-              class="w-4 h-4 accent-[rgb(0,200,75)]">
+              class="w-4 h-4 accent-[rgb(0,200,75)]" aria-label="Fréquence hebdomadaire">
           </div>
 
 <div id="weeklyDaysRow" class="flex gap-1">
-  <button data-dow="1" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">L</button>
-  <button data-dow="2" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">M</button>
-  <button data-dow="3" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">M</button>
-  <button data-dow="4" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">J</button>
-  <button data-dow="5" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">V</button>
-  <button data-dow="6" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">S</button>
-  <button data-dow="0" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">D</button>
+  <button type="button" data-dow="1" aria-label="Lundi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">L</button>
+  <button type="button" data-dow="2" aria-label="Mardi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">M</button>
+  <button type="button" data-dow="3" aria-label="Mercredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">M</button>
+  <button type="button" data-dow="4" aria-label="Jeudi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">J</button>
+  <button type="button" data-dow="5" aria-label="Vendredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">V</button>
+  <button type="button" data-dow="6" aria-label="Samedi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">S</button>
+  <button type="button" data-dow="0" aria-label="Dimanche" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">D</button>
 </div>
 
 
@@ -279,16 +764,16 @@
 
         <!-- MODE B : Tous les X jours -->
         <div id="freqIntervalBlock"
-          class="mb-3 p-3 rounded-lg border border-white/10 bg-white/5">
+          class="frequency-card mb-3 p-3 rounded-xl border border-white/10 bg-white/5">
           <div class="flex items-center justify-between mb-2">
             <div class="text-sm font-semibold">Tous les X jours</div>
             <input id="freqIntervalRadio" type="radio" name="freqMode" value="interval"
-              class="w-4 h-4 accent-[rgb(0,200,75)]">
+              class="w-4 h-4 accent-[rgb(0,200,75)]" aria-label="Fréquence tous les X jours">
           </div>
 
           <div class="flex items-center gap-2">
             <input id="everyXDaysInput" type="number" min="1"
-              class="w-16 py-2 px-3 rounded-md bg-white/10 border border-white/10 text-sm"
+              class="app-input w-16 py-2 px-3 rounded-lg bg-white/10 border border-white/10 text-sm"
               value="3">
             <div class="text-xs text-white/80">Répéter tous les X jours</div>
           </div>
@@ -300,16 +785,16 @@
 
         <!-- MODE C : Le X du mois -->
         <div id="freqMonthlyBlock"
-          class="mb-4 p-3 rounded-lg border border-white/10 bg-white/5">
+          class="frequency-card mb-4 p-3 rounded-xl border border-white/10 bg-white/5">
           <div class="flex items-center justify-between mb-2">
             <div class="text-sm font-semibold">Chaque mois le…</div>
             <input id="freqMonthlyRadio" type="radio" name="freqMode" value="monthly"
-              class="w-4 h-4 accent-[rgb(0,200,75)]">
+              class="w-4 h-4 accent-[rgb(0,200,75)]" aria-label="Fréquence mensuelle">
           </div>
 
           <div class="flex items-center gap-2">
             <input id="dayOfMonthInput" type="number" min="1" max="31"
-              class="w-16 py-2 px-3 rounded-md bg-white/10 border border-white/10 text-sm"
+              class="app-input w-16 py-2 px-3 rounded-lg bg-white/10 border border-white/10 text-sm"
               value="1">
             <div class="text-xs text-white/80">… du mois</div>
           </div>
@@ -322,19 +807,19 @@
 
       <!-- Boutons Annuler / Ajouter -->
       <div class="flex justify-end gap-2">
-        <button id="cancelAddHabit"
-          class="px-3 py-1 rounded-full hover:bg-white/5">
+        <button id="cancelAddHabit" type="button"
+          class="app-button app-button--ghost">
           Annuler
         </button>
-        <button id="confirmAddHabit"
-          class="px-3 py-1 bg-white/10 rounded-full hover:bg-white/15">
+        <button id="confirmAddHabit" type="submit"
+          class="app-button app-button--primary">
           Ajouter
         </button>
       </div>
-    </div>
+    </form>
   </div>
 
-  <div id="modalMonth" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+  <div id="modalMonth" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="monthModalTitle">
     <!-- Backdrop blobs (caché par défaut) -->
 <div id="monthBackdrop" class="blob-field hidden">
   <span class="blob blob--gold"   style="top:20%; left:25%;"></span>
@@ -344,12 +829,13 @@
 
 
     <!-- Carte modale -->
-    <div class="glass rounded-2xl p-4 w-full max-w-2xl max-h-[85vh] overflow-auto modal-card">
-      <div class="flex items-center justify-between mb-2">
-        <div class="font-bold text-center w-full" id="monthModalTitle">Mois</div>
-        <div class="flex items-center gap-2">
-          <button id="monthScrBtn" class="px-2 py-1 rounded hover:bg-white/5">Scr Sht</button>
-          <button id="closeMonth" class="px-2 py-1 rounded hover:bg-white/5">Fermer</button>
+    <div id="monthShareCard" class="glass summary-card rounded-2xl p-4 w-full max-w-2xl max-h-[85vh] overflow-auto modal-card">
+      <div class="summary-header mb-3">
+        <div class="font-extrabold summary-title" id="monthModalTitle">Mois</div>
+        <div class="summary-toolbar no-export">
+          <button id="monthPrettyBtn" class="summary-action" type="button" aria-pressed="false">Beau visuel</button>
+          <button id="monthDownloadBtn" class="summary-action summary-action--primary" type="button">Télécharger PNG</button>
+          <button id="closeMonth" class="summary-action" type="button">Fermer</button>
         </div>
       </div>
       <p id="monthDesc" class="text-xs text-white/60 mb-3">
@@ -360,7 +846,7 @@
   </div>
 
 
-  <div id="modalYear" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+  <div id="modalYear" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="yearModalTitle">
     <!-- Backdrop blobs (caché par défaut) -->
 <div id="yearBackdrop" class="blob-field hidden">
   <span class="blob blob--gold"   style="top:15%; left:70%;"></span>
@@ -370,12 +856,13 @@
 
 
     <!-- Carte modale -->
-    <div class="glass rounded-2xl p-4 w-full max-w-3xl max-h-[85vh] overflow-auto modal-card">
-      <div class="flex items-center justify-between mb-2">
-        <div class="font-bold text-center w-full" id="yearModalTitle">Année</div>
-        <div class="flex items-center gap-2">
-          <button id="yearScrBtn" class="px-2 py-1 rounded hover:bg-white/5">Scr Sht</button>
-          <button id="closeYear" class="px-2 py-1 rounded hover:bg-white/5">Fermer</button>
+    <div id="yearShareCard" class="glass summary-card rounded-2xl p-4 w-full max-w-3xl max-h-[85vh] overflow-auto modal-card">
+      <div class="summary-header mb-3">
+        <div class="font-extrabold summary-title" id="yearModalTitle">Année</div>
+        <div class="summary-toolbar no-export">
+          <button id="yearPrettyBtn" class="summary-action" type="button" aria-pressed="false">Beau visuel</button>
+          <button id="yearDownloadBtn" class="summary-action summary-action--primary" type="button">Télécharger PNG</button>
+          <button id="closeYear" class="summary-action" type="button">Fermer</button>
         </div>
       </div>
       <p  id="yearDesc" class="text-xs text-white/60 mb-3">
@@ -387,11 +874,11 @@
 
 
   <!-- Modal Installation -->
-  <div id="modalInstall" class="fixed inset-0 z-60 hidden items-center justify-center bg-black/50 p-4">
+  <div id="modalInstall" class="fixed inset-0 z-60 hidden items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="installTitle">
     <div class="glass rounded-2xl p-5 w-full max-w-md shadow-2xl">
       <div class="flex items-center justify-between mb-4">
-        <h3 class="font-bold text-lg">Installer l'application</h3>
-        <button id="closeInstall" class="px-2 py-1 rounded hover:bg-white/5">×</button>
+        <h3 id="installTitle" class="font-bold text-lg">Installer l'application</h3>
+        <button id="closeInstall" class="app-button app-button--icon" aria-label="Fermer">×</button>
       </div>
       
       <div class="space-y-4">
@@ -424,22 +911,22 @@
     </div>
 
     <div class="space-y-2">
-      <button id="menuImport" class="w-full text-left px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+      <button id="menuImport" class="nav-action">
         Importer
       </button>
-      <button id="menuExport" class="w-full text-left px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+      <button id="menuExport" class="nav-action">
         Exporter
       </button>
-      <button id="menuInstall" class="w-full text-left px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+      <button id="menuInstall" class="nav-action">
         Installer l'application
       </button>
-      <a href="https://example.com/donate" target="_blank" class="block w-full text-left px-3 py-2 rounded-lg gold-bg border border-white/10 ">
-        Faire un don
+      <a href="mailto:naim.benkherouf@gmail.com?subject=Soutenir%20HBTRK" class="block w-full text-left px-3 py-2 rounded-lg gold-bg border border-white/10 ">
+        Soutenir HBTRK
       </a>
-      <a href="mailto:naim.benkherouf@gmail.com" class="block w-full text-left px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+      <a href="mailto:naim.benkherouf@gmail.com" class="nav-action block">
         Contactez-moi
       </a>
-      <button id="menuLogout" class="w-full text-left px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10">
+      <button id="menuLogout" class="nav-action nav-action--danger">
         Se déconnecter
       </button>
     </div>
@@ -448,33 +935,54 @@
 
   <input id="fileInput" type="file" accept="application/json" class="hidden" />
 
+  <div id="textInputModal" class="fixed inset-0 z-[90] hidden items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-labelledby="textInputTitle" aria-describedby="textInputDescription">
+    <form id="textInputForm" class="glass modal-form-card w-full max-w-sm rounded-2xl p-5 shadow-2xl" novalidate>
+      <h2 id="textInputTitle" class="text-lg font-extrabold mb-1">Saisir un nom</h2>
+      <p id="textInputDescription" class="text-xs text-white/55 mb-4"></p>
+      <label for="textInputValue" class="sr-only">Nom</label>
+      <input id="textInputValue" type="text" autocomplete="off" enterkeyhint="done"
+             class="app-input w-full py-2.5 px-4 rounded-xl bg-white/10 border border-white/10"
+             placeholder="Nom">
+      <div class="flex justify-end gap-2 mt-4">
+        <button id="textInputCancel" type="button" class="app-button app-button--ghost">Annuler</button>
+        <button id="textInputConfirm" type="submit" class="app-button app-button--primary">Ajouter</button>
+      </div>
+    </form>
+  </div>
+
   <!-- Modale Auth -->
-  <div id="authModal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/60">
-    <div class="glass w-full max-w-sm mx-4 rounded-2xl p-5 shadow-2xl">
-      <h2 class="text-xl font-extrabold mb-3 text-center">Connexion</h2>
+  <div id="authModal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+    <form id="authForm" class="glass modal-form-card w-full max-w-sm rounded-2xl p-5 shadow-2xl" novalidate>
+      <h2 id="authTitle" class="text-xl font-extrabold mb-3 text-center">Connexion</h2>
       <p class="text-xs text-white/60 mb-4 text-center">Connecte-toi pour accéder à tes données.</p>
 
       <div class="space-y-2">
-        <input id="authEmail" type="email" autocomplete="email"
-              class="w-full py-2 px-4 rounded-full bg-white/10 border border-white/10"
+        <label for="authEmail" class="sr-only">Email</label>
+        <input id="authEmail" type="email" autocomplete="email" enterkeyhint="next"
+              class="app-input w-full py-2.5 px-4 rounded-xl bg-white/10 border border-white/10"
               placeholder="Email">
-        <input id="authPassword" type="password" autocomplete="current-password"
-              class="w-full py-2 px-4 rounded-full bg-white/10 border border-white/10"
+        <label for="authPassword" class="sr-only">Mot de passe</label>
+        <input id="authPassword" type="password" autocomplete="current-password" enterkeyhint="go"
+              class="app-input w-full py-2.5 px-4 rounded-xl bg-white/10 border border-white/10"
               placeholder="Mot de passe">
       </div>
 
       <div class="text-center mt-2">
-        <button id="forgotPassword" class="text-xs text-white/60 hover:text-white/90">Mot de passe oublié ?</button>
+        <button id="forgotPassword" type="button" class="text-xs text-white/60 hover:text-white/90">Mot de passe oublié ?</button>
       </div>
 
       <div id="authError" class="text-xs text-red-300 mt-2 min-h-[1rem]"></div>
 
       <div class="flex justify-between items-center mt-4">
-        <button id="authCreate" class="text-sm px-3 py-1 rounded-full hover:bg-white/5">Créer un compte</button>
-        <button id="authSubmit" class="text-sm px-4 py-1 rounded-full bg-white/10 hover:bg-white/15">Se connecter</button>
+        <button id="authCreate" type="button" class="app-button app-button--ghost">Créer un compte</button>
+        <button id="authSubmit" type="submit" class="app-button app-button--primary">Se connecter</button>
       </div>
-    </div>
+    </form>
   </div>
-  <script type="module" src="./app.js"></script>
+  <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
+  <script src="./dist/html2canvas-pro.min.js?v=20260803-1" defer
+          onload="document.documentElement.dataset.pngExporter='ready'"
+          onerror="document.documentElement.dataset.pngExporter='error'"></script>
+  <script type="module" src="./app.js?v=20260803-10"></script>
 </body>
 </html>

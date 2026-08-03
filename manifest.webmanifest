@@ -1,0 +1,20 @@
+{
+  "name": "HBTRK — Habit & Task Tracker",
+  "short_name": "HBTRK",
+  "description": "Calendrier annuel pour suivre ses habitudes et organiser ses tâches quotidiennes.",
+  "lang": "fr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0c10",
+  "theme_color": "#0b0c10",
+  "icons": [
+    {
+      "src": "./ico.png",
+      "sizes": "800x800",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
