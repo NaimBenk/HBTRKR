@@ -1157,15 +1157,23 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
     const surface = swipeSurface || activationElement;
     const reveal = revealElement || row;
     let detachWindowListeners = () => {};
+    const preventTouchScrollWhileDragging = event => {
+        if(pointerState?.dragging) event.preventDefault();
+    };
     const resetSwipe = () => {
         surface.style.transform = '';
+        surface.style.opacity = '';
         row.classList.remove('is-swiping');
+        row.classList.remove('is-swipe-ready');
         delete reveal.dataset.swipeDirection;
-        delete reveal.dataset.swipeLabel;
+        delete reveal.dataset.swipeSide;
+        delete reveal.dataset.swipeVariant;
+        delete reveal.dataset.swipeReady;
     };
     const finishDrag = () => {
         if(!pointerState?.dragging) return;
         row.classList.remove('is-dragging');
+        activationElement.style.touchAction = '';
         persistRenderedTaskOrder(row.parentElement, rowSelector, task.date);
     };
     const clearGesture = () => {
@@ -1173,6 +1181,8 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
         holdTimer = null;
         detachWindowListeners();
         detachWindowListeners = () => {};
+        activationElement.removeEventListener('touchmove', preventTouchScrollWhileDragging);
+        activationElement.style.touchAction = '';
         pointerState = null;
     };
     const startDrag = () => {
@@ -1180,8 +1190,47 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
         pointerState.dragging = true;
         suppressTaskClick(row);
         resetSwipe();
+        activationElement.style.touchAction = 'none';
+        activationElement.addEventListener('touchmove', preventTouchScrollWhileDragging, { passive:false });
         row.classList.add('is-dragging');
         if(navigator.vibrate) navigator.vibrate(12);
+    };
+
+    const updateSwipeFeedback = deltaX => {
+        const side = deltaX > 0 ? 'right' : 'left';
+        const action = task.kind === 'separator' || side === 'right' ? 'delete' : 'flag';
+        const distance = Math.abs(deltaX);
+        const revealed = distance >= pointerState.revealThreshold;
+        const ready = distance >= pointerState.activationThreshold;
+        const wasReady = pointerState.thresholdReady;
+        pointerState.thresholdReady = ready;
+        pointerState.action = action;
+        surface.style.transform = `translate3d(${deltaX}px, 0, 0)`;
+        row.classList.add('is-swiping');
+        row.classList.toggle('is-swipe-ready', ready);
+        if(!revealed){
+            delete reveal.dataset.swipeDirection;
+            delete reveal.dataset.swipeSide;
+            delete reveal.dataset.swipeVariant;
+            delete reveal.dataset.swipeReady;
+            if(ready !== wasReady && navigator.vibrate) navigator.vibrate(4);
+            return;
+        }
+        reveal.dataset.swipeDirection = action;
+        reveal.dataset.swipeSide = side;
+        reveal.dataset.swipeVariant = action === 'flag' && task.important ? 'unflag' : action;
+        reveal.dataset.swipeReady = String(ready);
+        if(ready !== wasReady && navigator.vibrate) navigator.vibrate(ready ? 10 : 4);
+    };
+
+    const animateSwipeDelete = async deltaX => {
+        const direction = deltaX < 0 ? -1 : 1;
+        const exitDistance = Math.max(window.innerWidth, reveal.getBoundingClientRect().width * 1.35);
+        surface.style.transform = `translate3d(${direction * exitDistance}px, 0, 0)`;
+        surface.style.opacity = '0';
+        row.classList.add('is-swipe-committing');
+        await new Promise(resolve => window.setTimeout(resolve, 150));
+        await deleteTaskDirect(task);
     };
 
     const onPointerMove = event => {
@@ -1203,16 +1252,12 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
             holdTimer = null;
             return;
         }
-        if(enableSwipe && Math.abs(deltaX) > 10 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15){
+        if(enableSwipe && Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15){
             clearTimeout(holdTimer);
             holdTimer = null;
             pointerState.swiping = true;
             suppressTaskClick(row);
-            const translated = Math.max(-96, Math.min(96, deltaX));
-            surface.style.transform = `translateX(${translated}px)`;
-            row.classList.add('is-swiping');
-            reveal.dataset.swipeDirection = deltaX > 0 ? 'delete' : 'flag';
-            reveal.dataset.swipeLabel = deltaX > 0 ? 'Supprimer' : (task.important ? 'Retirer le flag' : 'Important');
+            updateSwipeFeedback(deltaX);
             event.preventDefault();
         }
     };
@@ -1228,12 +1273,14 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
             return;
         }
         if(pointerState.swiping){
-            if(deltaX >= 66){
+            const action = pointerState.action;
+            const thresholdReached = Math.abs(deltaX) >= pointerState.activationThreshold;
+            if(thresholdReached && action === 'delete'){
                 clearGesture();
-                await deleteTaskDirect(task);
+                await animateSwipeDelete(deltaX);
                 return;
             }
-            if(deltaX <= -66 && task.kind !== 'separator'){
+            if(thresholdReached && action === 'flag' && task.kind !== 'separator'){
                 const nextImportant = !task.important;
                 clearGesture();
                 await setTaskImportant(task, nextImportant);
@@ -1256,7 +1303,21 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
     activationElement.addEventListener('pointerdown', event => {
         if(event.pointerType === 'mouse' && event.button !== 0) return;
         if(pointerState) onPointerCancel();
-        pointerState = { id:event.pointerId, pointerType:event.pointerType, startX:event.clientX, startY:event.clientY, lastX:event.clientX, lastY:event.clientY, dragging:false, swiping:false };
+        const surfaceWidth = Math.max(1, reveal.getBoundingClientRect().width);
+        pointerState = {
+            id:event.pointerId,
+            pointerType:event.pointerType,
+            startX:event.clientX,
+            startY:event.clientY,
+            lastX:event.clientX,
+            lastY:event.clientY,
+            dragging:false,
+            swiping:false,
+            action:null,
+            thresholdReady:false,
+            revealThreshold:Math.min(38, Math.max(26, surfaceWidth * .09)),
+            activationThreshold:Math.min(96, Math.max(68, surfaceWidth * .25))
+        };
         try { activationElement.setPointerCapture(event.pointerId); } catch(error){}
         window.addEventListener('pointermove', onPointerMove, { capture:true, passive:false });
         window.addEventListener('pointerup', onPointerUp, { capture:true });
@@ -1295,7 +1356,7 @@ function bindTaskKeyboardShortcuts(button, task){
         if(event.key === 'Delete'){
             event.preventDefault();
             deleteTaskDirect(task);
-        } else if(event.key.toLowerCase() === 'f'){
+        } else if(event.key.toLowerCase() === 'f' && task.kind !== 'separator'){
             event.preventDefault();
             setTaskImportant(task, !task.important);
         } else if(event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')){
@@ -1310,16 +1371,17 @@ function makeCompactSeparatorRow(task){
     row.className = 'compact-task-row task-separator-row';
     row.dataset.taskId = task.id;
     const handle = makeTaskDragHandle(task, row, '.compact-task-row');
-    const line = document.createElement('div');
-    line.className = 'task-separator-line';
-    line.innerHTML = '<span>Séparation</span>';
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'task-separator-delete';
-    remove.textContent = '×';
-    remove.setAttribute('aria-label', 'Supprimer la séparation');
-    remove.onclick = () => deleteTaskDirect(task);
-    row.append(handle, line, remove);
+    const swipeShell = document.createElement('div');
+    swipeShell.className = 'task-swipe-shell task-separator-swipe-shell';
+    const separator = document.createElement('button');
+    separator.type = 'button';
+    separator.className = 'compact-task-separator task-separator-line';
+    separator.setAttribute('aria-label', 'Séparation. Glisser à gauche ou à droite pour supprimer.');
+    separator.innerHTML = '<span></span><span></span>';
+    bindTaskKeyboardShortcuts(separator, task);
+    bindTaskPointerGestures({ row, activationElement:separator, swipeSurface:separator, revealElement:swipeShell, task, rowSelector:'.compact-task-row', enableDrag:false, enableSwipe:true });
+    swipeShell.append(separator);
+    row.append(handle, swipeShell);
     return row;
 }
 
@@ -1799,15 +1861,9 @@ function makeMobileSeparatorRow(task){
     const separator = document.createElement('button');
     separator.type = 'button';
     separator.className = 'mobile-task-separator';
-    separator.setAttribute('aria-label', 'Séparation. Maintenir pour déplacer, glisser à droite pour supprimer.');
-    separator.innerHTML = '<span></span><strong>Séparation</strong><span></span>';
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'task-separator-delete';
-    remove.textContent = '×';
-    remove.setAttribute('aria-label', 'Supprimer la séparation');
-    remove.onclick = () => deleteTaskDirect(task);
-    main.append(separator, remove);
+    separator.setAttribute('aria-label', 'Séparation. Maintenir pour déplacer, glisser à gauche ou à droite pour supprimer.');
+    separator.innerHTML = '<span></span><span></span>';
+    main.append(separator);
     row.append(main);
     bindTaskKeyboardShortcuts(separator, task);
     bindTaskPointerGestures({ row, activationElement:separator, swipeSurface:separator, revealElement:main, task, rowSelector:'.mobile-task-row', holdDelay:320, enableDrag:true, enableSwipe:true });

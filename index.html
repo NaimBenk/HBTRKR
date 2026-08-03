@@ -19,7 +19,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#080808">
   
-  <link rel="stylesheet" href="./dist/style.css?v=20260803-9">
+  <link rel="stylesheet" href="./dist/style.css?v=20260803-11">
 
   <style>
     :root{
@@ -450,8 +450,36 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 .compact-task-row.is-important .compact-task { border-color: rgba(255,215,0,.55); box-shadow: inset 0 0 0 1px rgba(255,215,0,.09); }
 
 .mobile-day-subline { display: flex; align-items: center; justify-content: center; gap: .55rem; }
-.day-bottom-nav { padding-bottom: max(1rem, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent, rgba(11,12,16,.78)); pointer-events: none; }
-.day-bottom-nav > div { pointer-events: auto; }
+.day-bottom-nav {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  padding: 1rem 0 max(1rem, env(safe-area-inset-bottom));
+  background: transparent;
+  pointer-events: none;
+}
+#dayHabitsList { padding-bottom: 4.75rem; }
+.day-nav-pill {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  pointer-events: auto;
+  border-color: rgba(255,255,255,.2);
+  background: linear-gradient(145deg, rgba(255,255,255,.14), rgba(17,21,28,.4) 48%, rgba(255,255,255,.07));
+  box-shadow: 0 12px 34px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.16), inset 0 -1px rgba(255,255,255,.035);
+  backdrop-filter: blur(22px) saturate(155%);
+  -webkit-backdrop-filter: blur(22px) saturate(155%);
+}
+.day-nav-pill::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 1px 12% auto;
+  height: 45%;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255,255,255,.14), transparent);
+  pointer-events: none;
+}
 .mobile-day-color { display: none; width: 1.6rem; height: 1.6rem; font-size: 1rem; }
 .mobile-task-button.is-important { border-color: rgba(255,215,0,.62); box-shadow: 0 0 0 1px rgba(255,215,0,.14), 0 8px 22px rgba(255,215,0,.08); }
 #dayPage[data-day-color="green"] { background: radial-gradient(circle at 50% 20%, rgba(49,216,116,.16), transparent 48%); }
@@ -538,15 +566,21 @@ button:active:not(:disabled) { transform: scale(.97); }
   border-radius: .7rem;
 }
 .task-swipe-shell { display: grid; border-radius: .45rem; }
-.compact-task { width: 100%; touch-action: pan-y; }
+.compact-task,
+.compact-task-separator { width: 100%; touch-action: pan-y; }
 .mobile-task-main { border-radius: 1.75rem; }
 .compact-task,
 .mobile-task-button,
 .mobile-task-separator,
-.task-separator-delete { position: relative; z-index: 1; }
+.compact-task-separator { position: relative; z-index: 1; }
 .compact-task,
 .mobile-task-button,
-.mobile-task-separator { transition: transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .18s ease, opacity .18s ease; }
+.mobile-task-separator,
+.compact-task-separator { transition: transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .18s ease, opacity .18s ease, filter .18s ease; }
+.is-swiping .compact-task,
+.is-swiping .mobile-task-button,
+.is-swiping .mobile-task-separator,
+.is-swiping .compact-task-separator { transition: none; }
 .task-swipe-shell::before,
 .mobile-task-main::before {
   content: "";
@@ -556,45 +590,62 @@ button:active:not(:disabled) { transform: scale(.97); }
   display: flex;
   align-items: center;
   border-radius: inherit;
-  color: #fff;
-  font-size: .68rem;
+  background: transparent;
+  color: rgba(255,255,255,.58);
+  font-size: 1.05rem;
   font-weight: 850;
-  letter-spacing: .02em;
   opacity: 0;
-  transition: opacity .15s ease;
+  transition: opacity .12s ease, background .16s ease, color .16s ease, box-shadow .16s ease, font-size .16s ease;
   pointer-events: none;
 }
-.task-swipe-shell[data-swipe-direction="delete"]::before,
-.mobile-task-main[data-swipe-direction="delete"]::before { content: attr(data-swipe-label); justify-content: flex-start; padding-left: .65rem; background: linear-gradient(90deg, rgba(239,68,68,.96), rgba(185,28,28,.78)); opacity: 1; }
+.task-swipe-shell[data-swipe-direction="delete"][data-swipe-side="right"]::before,
+.mobile-task-main[data-swipe-direction="delete"][data-swipe-side="right"]::before { content: "✕"; justify-content: flex-start; padding-left: .85rem; opacity: 1; }
+.task-swipe-shell[data-swipe-direction="delete"][data-swipe-side="left"]::before,
+.mobile-task-main[data-swipe-direction="delete"][data-swipe-side="left"]::before { content: "✕"; justify-content: flex-end; padding-right: .85rem; opacity: 1; }
 .task-swipe-shell[data-swipe-direction="flag"]::before,
-.mobile-task-main[data-swipe-direction="flag"]::before { content: attr(data-swipe-label); justify-content: flex-end; padding-right: .65rem; background: linear-gradient(270deg, rgba(245,165,36,.96), rgba(180,83,9,.78)); opacity: 1; }
+.mobile-task-main[data-swipe-direction="flag"]::before { content: "⚑"; justify-content: flex-end; padding-right: .85rem; opacity: 1; }
+.task-swipe-shell[data-swipe-variant="unflag"]::before,
+.mobile-task-main[data-swipe-variant="unflag"]::before { content: "⚐"; }
+.task-swipe-shell[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="right"]::before,
+.mobile-task-main[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="right"]::before { color:#fff; background: linear-gradient(90deg, rgba(239,68,68,.98), rgba(127,29,29,.8)); }
+.task-swipe-shell[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="left"]::before,
+.mobile-task-main[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="left"]::before { color:#fff; background: linear-gradient(270deg, rgba(239,68,68,.98), rgba(127,29,29,.8)); }
+.task-swipe-shell[data-swipe-direction="flag"][data-swipe-ready="true"]::before,
+.mobile-task-main[data-swipe-direction="flag"][data-swipe-ready="true"]::before { color:#fff; background: linear-gradient(270deg, rgba(245,165,36,.96), rgba(180,83,9,.78)); }
+.task-swipe-shell[data-swipe-ready="true"]::before,
+.mobile-task-main[data-swipe-ready="true"]::before { font-size: 1.2rem; box-shadow: inset 0 0 0 2px rgba(255,255,255,.18); }
+.is-swipe-ready .compact-task,
+.is-swipe-ready .mobile-task-button,
+.is-swipe-ready .mobile-task-separator,
+.is-swipe-ready .compact-task-separator { filter: brightness(1.08) saturate(1.08); }
+.is-swipe-committing { pointer-events: none; }
 .compact-task-row.is-dragging,
 .mobile-task-row.is-dragging { z-index: 20; opacity: .78; transform: scale(1.018); filter: drop-shadow(0 12px 18px rgba(0,0,0,.34)); }
 .compact-task-row.is-dragging .task-drag-handle { color: #07150c; border-color: #68ef9c; background: #31d874; }
-.task-separator-row { grid-template-columns: auto minmax(0,1fr) auto; align-items: center; animation: separator-enter .2s ease both; }
-.task-separator-line { display: flex; align-items: center; gap: .45rem; min-height: 1.4rem; color: rgba(255,255,255,.34); font-size: .54rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
-.task-separator-line::before,
-.task-separator-line::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(147,197,253,.42)); }
-.task-separator-line::after { background: linear-gradient(90deg, rgba(147,197,253,.42), transparent); }
-.task-separator-delete {
-  display: grid;
-  place-items: center;
-  width: 1.7rem;
-  height: 1.7rem;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 999px;
-  color: rgba(255,255,255,.42);
-  font-size: .9rem;
+.task-separator-row { grid-template-columns: auto minmax(0,1fr); align-items: center; animation: separator-enter .2s ease both; }
+.task-separator-swipe-shell { border-radius: 999px; }
+.task-separator-line,
+.mobile-task-separator {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
-.task-separator-delete:hover { color: #fecaca; border-color: rgba(239,68,68,.34); background: rgba(239,68,68,.11); }
+.task-separator-line { min-height: 1.5rem; padding: .28rem .55rem; }
+.task-separator-line span,
+.mobile-task-separator span { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(147,197,253,.5)); }
+.task-separator-line span:last-child,
+.mobile-task-separator span:last-child { background: linear-gradient(90deg, rgba(147,197,253,.5), transparent); }
 .mobile-task-row { position: relative; isolation: isolate; }
 .mobile-task-button,
-.mobile-task-separator { touch-action: none; user-select: none; -webkit-user-select: none; }
+.mobile-task-separator { touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 .mobile-task-row.is-dragging .mobile-task-main { box-shadow: 0 0 0 2px rgba(49,216,116,.3); }
-.task-separator-main { grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: .55rem; }
-.mobile-task-separator { display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 2.4rem; color: rgba(255,255,255,.42); font-size: .62rem; font-weight: 850; letter-spacing: .1em; text-transform: uppercase; }
-.mobile-task-separator span { flex: 1; height: 1px; background: linear-gradient(90deg, transparent, rgba(147,197,253,.5)); }
-.mobile-task-separator span:last-child { background: linear-gradient(90deg, rgba(147,197,253,.5), transparent); }
+.task-separator-main { grid-template-columns: minmax(0,1fr); align-items: center; }
+.mobile-task-separator { min-height: 2rem; padding: .45rem .8rem; }
 .mobile-task-gesture-hint { width: 80%; padding: .1rem .3rem .3rem; color: rgba(255,255,255,.38); font-size: .62rem; line-height: 1.4; text-align: center; }
 @keyframes separator-enter { from { opacity: 0; transform: scaleX(.92); } to { opacity: 1; transform: scaleX(1); } }
 
@@ -684,7 +735,7 @@ button:active:not(:disabled) { transform: scale(.97); }
     <div id="habitsList" class="space-y-3 max-h-144 overflow-auto pb-2"></div>
   </div>
 
-  <section id="dayPage" class="hidden pt-20 pb-32 max-w-2xl mx-auto px-4 min-h-screen flex flex-col">
+  <section id="dayPage" class="hidden pt-20 max-w-2xl mx-auto px-4 min-h-[100dvh] flex flex-col">
     <div class="mobile-day-mode">
       <div id="mobileDayModeToggle" class="mobile-mode-toggle" role="group" aria-label="Contenu du jour">
         <button id="mobileHabitsMode" type="button" class="mobile-mode-option" aria-pressed="true">Habits</button>
@@ -700,9 +751,9 @@ button:active:not(:disabled) { transform: scale(.97); }
     </div>
     <div id="dayHabitsList" class="mb-4 space-y-3 flex flex-col items-center"></div>
     
-    <!-- Barre de navigation fixée en bas -->
-    <div class="day-bottom-nav fixed bottom-0 left-0 right-0 z-50 flex items-center justify-center py-4">
-      <div class="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 backdrop-blur px-1.5 py-1 shadow-lg">
+    <!-- Navigation de jour : reste accessible sans créer un second scroll -->
+    <div class="day-bottom-nav z-50 flex items-center justify-center">
+      <div class="day-nav-pill flex items-center gap-1 rounded-full border border-white/10 px-1.5 py-1">
         <button id="prevDay" aria-label="Jour précédent" class="h-11 w-11 sm:h-10 sm:w-10 grid place-items-center rounded-full hover:bg-white/10 active:scale-95 transition focus:outline-none focus:ring-2 focus:ring-white/20">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -983,6 +1034,6 @@ button:active:not(:disabled) { transform: scale(.97); }
   <script src="./dist/html2canvas-pro.min.js?v=20260803-1" defer
           onload="document.documentElement.dataset.pngExporter='ready'"
           onerror="document.documentElement.dataset.pngExporter='error'"></script>
-  <script type="module" src="./app.js?v=20260803-10"></script>
+  <script type="module" src="./app.js?v=20260803-12"></script>
 </body>
 </html>
