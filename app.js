@@ -507,67 +507,6 @@ const getCompletionRate = (dateKey)=>{ const activeHabits = data.habits.filter(h
 const headerEl = document.querySelector('header');
 const userBadge = document.getElementById('userBadge');
 const userNamePart = document.getElementById('userNamePart');
-let mobileHeaderGesture = null;
-
-const mobileHeaderIsCollapsible = () => viewportIsSmall() || mobileLandscapeLocked;
-const pageScrollTop = () => Math.max(
-    0,
-    window.scrollY || 0,
-    document.scrollingElement?.scrollTop || 0
-);
-
-function setMobileHeaderRevealed(revealed){
-    const collapsible = mobileHeaderIsCollapsible();
-    const next = Boolean(revealed && collapsible);
-    document.body.classList.toggle('mobile-header-revealed', next);
-    headerEl.toggleAttribute('inert', collapsible && !next);
-    if(collapsible && !next) headerEl.setAttribute('aria-hidden', 'true');
-    else headerEl.removeAttribute('aria-hidden');
-}
-
-// Sur mobile, le header ne revient que lors d'un vrai "pull" vertical depuis le haut.
-// Le geste reste passif afin de ne jamais recréer un scroll séparé dans les listes.
-document.addEventListener('pointerdown', event => {
-    if(!mobileHeaderIsCollapsible() || headerEl.classList.contains('hidden')) return;
-    if(event.isPrimary === false || (typeof event.button === 'number' && event.button > 0)) return;
-    const isRevealed = document.body.classList.contains('mobile-header-revealed');
-    if(!isRevealed && pageScrollTop() > 2) return;
-    mobileHeaderGesture = {
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        isRevealed
-    };
-}, { passive:true });
-
-document.addEventListener('pointermove', event => {
-    const gesture = mobileHeaderGesture;
-    if(!gesture || gesture.pointerId !== event.pointerId) return;
-    const deltaX = event.clientX - gesture.startX;
-    const deltaY = event.clientY - gesture.startY;
-    if(Math.abs(deltaY) < Math.abs(deltaX) * 1.2) return;
-    if(!gesture.isRevealed && deltaY >= 56 && pageScrollTop() <= 2){
-        setMobileHeaderRevealed(true);
-        mobileHeaderGesture = null;
-    } else if(gesture.isRevealed && deltaY <= -38){
-        setMobileHeaderRevealed(false);
-        mobileHeaderGesture = null;
-    }
-}, { passive:true });
-
-const clearMobileHeaderGesture = event => {
-    if(!event || !mobileHeaderGesture || mobileHeaderGesture.pointerId === event.pointerId){
-        mobileHeaderGesture = null;
-    }
-};
-document.addEventListener('pointerup', clearMobileHeaderGesture, { passive:true });
-document.addEventListener('pointercancel', clearMobileHeaderGesture, { passive:true });
-window.addEventListener('scroll', () => {
-    if(document.body.classList.contains('mobile-header-revealed') && pageScrollTop() > 12){
-        setMobileHeaderRevealed(false);
-    }
-}, { passive:true });
-setMobileHeaderRevealed(false);
 
 function extractLocalPart(email){
     if(!email || typeof email !== 'string') return '';
@@ -2228,8 +2167,7 @@ function setMobileDayMode(mode){
 }
 
 function syncPrimaryActionButton(){
-    const tasksMode = !dayPage.classList.contains('hidden') && mobileDayMode === 'tasks';
-    addHabitBtn.classList.toggle('hidden', tasksMode);
+    addHabitBtn.classList.remove('hidden');
     addHabitBtn.textContent = '+ Habitude';
     addHabitBtn.setAttribute('aria-label', 'Ajouter une habitude');
 }
@@ -2299,14 +2237,12 @@ async function toggleMobileLandscape(){
         }
         mobileLandscapeLocked=false;
         landscapeFullscreenOwned=false;
-        setMobileHeaderRevealed(false);
         syncOrientationButton();
         router();
         return;
     }
 
     mobileLandscapeLocked=true;
-    setMobileHeaderRevealed(false);
     syncOrientationButton();
     try {
         if(!screen.orientation?.lock) throw new Error('Orientation lock unsupported');
@@ -2324,7 +2260,6 @@ async function toggleMobileLandscape(){
         router();
     } catch(error){
         mobileLandscapeLocked=false;
-        setMobileHeaderRevealed(false);
         if(landscapeFullscreenOwned && document.fullscreenElement){
             try { await document.exitFullscreen(); } catch(exitError){}
         }
@@ -2489,10 +2424,6 @@ function goHome(){
 
 const modalAddHabit=document.getElementById('modalAddHabit');
 addHabitBtn.onclick = ()=>{
-    if(!dayPage.classList.contains('hidden') && mobileDayMode === 'tasks'){
-        addCompactTask(focusedDateKey || formatDateKey(new Date()));
-        return;
-    }
     // reset champs de base
     document.getElementById('habitNameInput').value = '';
     document.getElementById('habitStartInput').value = new Date().toISOString().slice(0,10);
@@ -2701,7 +2632,6 @@ window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
     const small = isSmall();
-    if(!small) setMobileHeaderRevealed(false);
     syncOrientationButton();
     if (lastIsSmall === null || small !== lastIsSmall) {
         lastIsSmall = small;

@@ -22,7 +22,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#080808">
   
-  <link rel="stylesheet" href="./dist/style.css?v=20260804-3">
+  <link rel="stylesheet" href="./dist/style.css?v=20260804-4">
 
   <style>
     :root{
@@ -421,10 +421,12 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 .mobile-mode-toggle {
   display: inline-flex;
   padding: .2rem;
-  border: 1px solid rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.14);
   border-radius: 999px;
-  background: rgba(255,255,255,.045);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 8px 24px rgba(0,0,0,.16);
+  background: rgba(9,12,16,.16);
+  box-shadow: 0 8px 24px rgba(0,0,0,.16), inset 0 1px rgba(255,255,255,.13);
+  backdrop-filter: blur(16px) saturate(125%);
+  -webkit-backdrop-filter: blur(16px) saturate(125%);
 }
 .mobile-mode-option {
   min-width: 5.7rem;
@@ -436,8 +438,8 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
   transition: color .16s ease, background .16s ease, box-shadow .16s ease;
 }
 .mobile-mode-option:hover { color: rgba(255,255,255,.86); background: rgba(255,255,255,.055); }
-.mobile-mode-option[aria-pressed="true"] { color: #07150c; background: #31d874; box-shadow: 0 3px 12px rgba(49,216,116,.22); }
-.mobile-mode-option[aria-pressed="true"]:hover { color:#07150c; background:#3edf7d; }
+.mobile-mode-option[aria-pressed="true"] { color: #edfff4; background: rgba(49,216,116,.5); box-shadow: inset 0 1px rgba(255,255,255,.17), 0 3px 12px rgba(49,216,116,.12); }
+.mobile-mode-option[aria-pressed="true"]:hover { color:#fff; background:rgba(49,216,116,.58); }
 .mobile-task-button[data-status="done"] { color: #04150a; background: rgba(49,216,116,.92); border-color: #68ef9c; }
 .mobile-task-button[data-status="later"] { color: var(--task-later-ink); background: linear-gradient(135deg, rgba(249,115,22,.96), rgba(234,88,12,.94)); border-color: var(--task-later-border); }
 .mobile-task-button[data-status="skipped"] { color: #210606; background: rgba(240,82,82,.9); border-color: #ff8d8d; }
@@ -515,7 +517,7 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
   left: 0;
   width: min(32rem, calc(100% - 2rem));
   margin: 0 auto;
-  z-index: 50;
+  z-index: 60;
   display: grid;
   justify-items: center;
   gap: .42rem;
@@ -530,61 +532,66 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
   isolation: isolate;
   overflow: hidden;
   pointer-events: auto;
-  border-color: rgba(255,255,255,.19);
-  background:
-    linear-gradient(145deg, rgba(255,255,255,.15), rgba(255,255,255,.045) 42%, rgba(5,9,14,.24) 74%),
-    rgba(18,24,31,.4);
+  border-color: rgba(255,255,255,.15);
+  background: rgba(8,11,15,.17);
   box-shadow:
-    0 14px 36px rgba(0,0,0,.3),
-    inset 0 1px rgba(255,255,255,.2),
-    inset 0 -1px rgba(255,255,255,.045);
-  backdrop-filter: blur(24px) saturate(175%) contrast(105%);
-  -webkit-backdrop-filter: blur(24px) saturate(175%) contrast(105%);
+    0 12px 34px rgba(0,0,0,.2),
+    inset 0 1px rgba(255,255,255,.16),
+    inset 0 -1px rgba(255,255,255,.04);
+  backdrop-filter: blur(17px) saturate(125%);
+  -webkit-backdrop-filter: blur(17px) saturate(125%);
 }
 .day-nav-pill::before {
   content: "";
   position: absolute;
   z-index: 0;
-  inset: 1px;
+  top: 1px;
+  right: 12%;
+  left: 12%;
+  height: 42%;
   border-radius: inherit;
-  background:
-    radial-gradient(ellipse at 24% -20%, rgba(255,255,255,.27), transparent 46%),
-    linear-gradient(112deg, transparent 12%, rgba(255,255,255,.11) 31%, transparent 49%);
-  opacity: .82;
+  background: rgba(255,255,255,.055);
+  filter: blur(8px);
+  opacity: .9;
   pointer-events: none;
 }
 .day-nav-pill::after {
   content: "";
   position: absolute;
   z-index: 0;
-  right: 8%;
-  bottom: 2px;
-  left: 8%;
-  height: 32%;
+  right: 14%;
+  bottom: 3px;
+  left: 14%;
+  height: 1px;
   border-radius: 999px;
-  background: radial-gradient(ellipse at 70% 120%, rgba(96,165,250,.12), transparent 58%);
-  filter: blur(4px);
+  background: rgba(255,255,255,.07);
   pointer-events: none;
 }
 .day-nav-pill > button { position: relative; z-index: 1; }
+#todayBtn {
+  color: #effff5;
+  border-color: rgba(104,239,156,.25);
+  background: rgba(49,216,116,.38);
+  box-shadow: inset 0 1px rgba(255,255,255,.16), 0 4px 16px rgba(49,216,116,.1);
+}
+#todayBtn:hover { background: rgba(49,216,116,.46); }
 .mobile-day-color {
-  position: fixed;
-  right: max(.7rem, env(safe-area-inset-right));
+  position: absolute;
+  right: max(0rem, env(safe-area-inset-right));
   bottom: max(.9rem, env(safe-area-inset-bottom));
   z-index: 58;
+  pointer-events: auto;
   display: grid;
   place-items: center;
   width: 2.35rem;
   height: 1.8rem;
   padding: 0;
-  border: 1px solid rgba(255,255,255,.17);
+  border: 1px solid rgba(255,255,255,.14);
   border-radius: 999px;
-  background:
-    radial-gradient(circle at 28% 8%, rgba(255,255,255,.24), transparent 42%),
-    linear-gradient(145deg, rgba(255,255,255,.13), rgba(10,14,19,.46));
-  box-shadow: 0 10px 28px rgba(0,0,0,.3), inset 0 1px rgba(255,255,255,.16);
-  backdrop-filter: blur(20px) saturate(165%);
-  -webkit-backdrop-filter: blur(20px) saturate(165%);
+  background: rgba(8,11,15,.17);
+  box-shadow: 0 8px 24px rgba(0,0,0,.18), inset 0 1px rgba(255,255,255,.14);
+  backdrop-filter: blur(16px) saturate(125%);
+  -webkit-backdrop-filter: blur(16px) saturate(125%);
 }
 .mobile-day-color-dot {
   width: .72rem;
@@ -677,7 +684,7 @@ button:active:not(:disabled) { transform: scale(.97); }
 
 @keyframes month-expand { from { opacity: .65; transform: scale(.985); } to { opacity: 1; transform: scale(1); } }
 @keyframes task-enter { from { opacity: 0; transform: translateY(.35rem); } to { opacity: 1; transform: translateY(0); } }
-@keyframes page-enter { from { opacity: 0; transform: translateY(.45rem); } to { opacity: 1; transform: translateY(0); } }
+@keyframes page-enter { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modal-enter { from { opacity: 0; transform: translateY(.7rem) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 .compact-task-row { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: stretch; isolation: isolate; }
@@ -813,13 +820,17 @@ button:active:not(:disabled) { transform: scale(.97); }
 @media (max-width: 639px) {
   .app-header-inner { min-height: 3.1rem; }
   .app-header {
-    transform: translateY(calc(-100% - env(safe-area-inset-top)));
-    opacity: .98;
-    pointer-events: none;
+    transform: none;
+    opacity: 1;
+    pointer-events: auto;
+    border-bottom-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
-  body.mobile-header-revealed .app-header { transform: translateY(0); pointer-events: auto; }
-  #homePage { padding-top: calc(1.25rem + env(safe-area-inset-top)); }
-  #dayPage { padding-top: calc(1rem + env(safe-area-inset-top)); }
+  #homePage { padding-top: calc(5rem + env(safe-area-inset-top)); }
+  #dayPage { padding-top: calc(5rem + env(safe-area-inset-top)); }
   .modal-card { padding: .9rem; }
   .summary-header { grid-template-columns: 1fr; gap: .7rem; }
   .summary-title { text-align: center; }
@@ -836,13 +847,17 @@ button:active:not(:disabled) { transform: scale(.97); }
   .mobile-day-color { bottom: max(4.65rem, calc(4rem + env(safe-area-inset-bottom))); }
 }
 .mobile-landscape-lock .app-header {
-  transform: translateY(calc(-100% - env(safe-area-inset-top)));
-  opacity: .98;
-  pointer-events: none;
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+  border-bottom-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
-.mobile-landscape-lock body.mobile-header-revealed .app-header { transform: translateY(0); pointer-events: auto; }
-.mobile-landscape-lock #homePage { padding-top: calc(1.25rem + env(safe-area-inset-top)); }
-.mobile-landscape-lock #dayPage { padding-top: calc(1rem + env(safe-area-inset-top)); }
+.mobile-landscape-lock #homePage { padding-top: calc(5rem + env(safe-area-inset-top)); }
+.mobile-landscape-lock #dayPage { padding-top: calc(5rem + env(safe-area-inset-top)); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
@@ -928,10 +943,10 @@ button:active:not(:disabled) { transform: scale(.97); }
           </button>
         </div>
       </div>
+      <button id="mobileDayColor" type="button" class="mobile-day-color" aria-label="Changer la couleur du jour">
+        <span class="mobile-day-color-dot" aria-hidden="true"></span>
+      </button>
     </div>
-    <button id="mobileDayColor" type="button" class="mobile-day-color" aria-label="Changer la couleur du jour">
-      <span class="mobile-day-color-dot" aria-hidden="true"></span>
-    </button>
   </section>
 
   <!-- Modal Add Habit avec fréquence -->
@@ -1204,6 +1219,6 @@ button:active:not(:disabled) { transform: scale(.97); }
   <script src="./dist/html2canvas-pro.min.js?v=20260803-1" defer
           onload="document.documentElement.dataset.pngExporter='ready'"
           onerror="document.documentElement.dataset.pngExporter='error'"></script>
-  <script type="module" src="./app.js?v=20260804-3"></script>
+  <script type="module" src="./app.js?v=20260804-4"></script>
 </body>
 </html>
