@@ -255,9 +255,12 @@ const textInputForm = document.getElementById('textInputForm');
 const textInputTitle = document.getElementById('textInputTitle');
 const textInputDescription = document.getElementById('textInputDescription');
 const textInputValue = document.getElementById('textInputValue');
+const textInputMultiline = document.getElementById('textInputMultiline');
+const textInputMultilineHint = document.getElementById('textInputMultilineHint');
 const textInputConfirm = document.getElementById('textInputConfirm');
 const textInputCancel = document.getElementById('textInputCancel');
 let textInputResolver = null;
+let textInputUsesMultiline = false;
 
 function closeTextInputModal(value = null){
     textInputModal.classList.add('hidden');
@@ -267,27 +270,38 @@ function closeTextInputModal(value = null){
     resolve?.(value);
 }
 
-function requestTextInput({ title, description = '', value = '', placeholder = 'Nom', confirmLabel = 'Ajouter' }){
+function requestTextInput({ title, description = '', value = '', placeholder = 'Nom', confirmLabel = 'Ajouter', multiline = false }){
     if(textInputResolver) closeTextInputModal(null);
+    textInputUsesMultiline = multiline;
     textInputTitle.textContent = title;
     textInputDescription.textContent = description;
-    textInputValue.value = value;
-    textInputValue.placeholder = placeholder;
+    const activeInput = multiline ? textInputMultiline : textInputValue;
+    const inactiveInput = multiline ? textInputValue : textInputMultiline;
+    activeInput.value = value;
+    activeInput.placeholder = placeholder;
+    activeInput.classList.remove('hidden');
+    inactiveInput.classList.add('hidden');
+    textInputMultilineHint.classList.toggle('hidden', !multiline);
     textInputConfirm.textContent = confirmLabel;
     textInputModal.classList.remove('hidden');
     textInputModal.classList.add('flex');
     requestAnimationFrame(() => {
-        textInputValue.focus();
-        if(value) textInputValue.select();
+        activeInput.focus();
+        if(value) activeInput.select();
     });
     return new Promise(resolve => { textInputResolver = resolve; });
 }
 
 textInputForm?.addEventListener('submit', event => {
     event.preventDefault();
-    closeTextInputModal(textInputValue.value);
+    closeTextInputModal(textInputUsesMultiline ? textInputMultiline.value : textInputValue.value);
 });
 bindInputEnterSubmit(textInputForm, textInputConfirm);
+textInputMultiline?.addEventListener('keydown', event => {
+    if(event.key !== 'Enter' || event.isComposing || (!event.ctrlKey && !event.metaKey)) return;
+    event.preventDefault();
+    textInputForm.requestSubmit(textInputConfirm);
+});
 textInputCancel?.addEventListener('click', () => closeTextInputModal(null));
 textInputModal?.addEventListener('click', event => {
     if(event.target === textInputModal) closeTextInputModal(null);
@@ -424,7 +438,9 @@ const now = new Date(); const currentYear = now.getFullYear(); const currentMont
 let mobileLandscapeLocked = false;
 let landscapeFullscreenOwned = false;
 let mobileDayMode = localStorage.getItem('hbtrk-mobile-day-mode') === 'tasks' ? 'tasks' : 'habits';
-let expandedTaskMonthKey = null;
+let expandedMonthKey = null;
+let expandedMonthMode = 'habits';
+let expandedMonthFocusDateKey = null;
 let minYear = 2025; let maxYear = currentYear + 5;
 const viewportIsSmall = () => window.matchMedia('(max-width: 639px)').matches;
 const isSmall = () => mobileLandscapeLocked || viewportIsSmall();
@@ -491,6 +507,67 @@ const getCompletionRate = (dateKey)=>{ const activeHabits = data.habits.filter(h
 const headerEl = document.querySelector('header');
 const userBadge = document.getElementById('userBadge');
 const userNamePart = document.getElementById('userNamePart');
+let mobileHeaderGesture = null;
+
+const mobileHeaderIsCollapsible = () => viewportIsSmall() || mobileLandscapeLocked;
+const pageScrollTop = () => Math.max(
+    0,
+    window.scrollY || 0,
+    document.scrollingElement?.scrollTop || 0
+);
+
+function setMobileHeaderRevealed(revealed){
+    const collapsible = mobileHeaderIsCollapsible();
+    const next = Boolean(revealed && collapsible);
+    document.body.classList.toggle('mobile-header-revealed', next);
+    headerEl.toggleAttribute('inert', collapsible && !next);
+    if(collapsible && !next) headerEl.setAttribute('aria-hidden', 'true');
+    else headerEl.removeAttribute('aria-hidden');
+}
+
+// Sur mobile, le header ne revient que lors d'un vrai "pull" vertical depuis le haut.
+// Le geste reste passif afin de ne jamais recréer un scroll séparé dans les listes.
+document.addEventListener('pointerdown', event => {
+    if(!mobileHeaderIsCollapsible() || headerEl.classList.contains('hidden')) return;
+    if(event.isPrimary === false || (typeof event.button === 'number' && event.button > 0)) return;
+    const isRevealed = document.body.classList.contains('mobile-header-revealed');
+    if(!isRevealed && pageScrollTop() > 2) return;
+    mobileHeaderGesture = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        isRevealed
+    };
+}, { passive:true });
+
+document.addEventListener('pointermove', event => {
+    const gesture = mobileHeaderGesture;
+    if(!gesture || gesture.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - gesture.startX;
+    const deltaY = event.clientY - gesture.startY;
+    if(Math.abs(deltaY) < Math.abs(deltaX) * 1.2) return;
+    if(!gesture.isRevealed && deltaY >= 56 && pageScrollTop() <= 2){
+        setMobileHeaderRevealed(true);
+        mobileHeaderGesture = null;
+    } else if(gesture.isRevealed && deltaY <= -38){
+        setMobileHeaderRevealed(false);
+        mobileHeaderGesture = null;
+    }
+}, { passive:true });
+
+const clearMobileHeaderGesture = event => {
+    if(!event || !mobileHeaderGesture || mobileHeaderGesture.pointerId === event.pointerId){
+        mobileHeaderGesture = null;
+    }
+};
+document.addEventListener('pointerup', clearMobileHeaderGesture, { passive:true });
+document.addEventListener('pointercancel', clearMobileHeaderGesture, { passive:true });
+window.addEventListener('scroll', () => {
+    if(document.body.classList.contains('mobile-header-revealed') && pageScrollTop() > 12){
+        setMobileHeaderRevealed(false);
+    }
+}, { passive:true });
+setMobileHeaderRevealed(false);
 
 function extractLocalPart(email){
     if(!email || typeof email !== 'string') return '';
@@ -727,11 +804,175 @@ function monthRateCached(h, year, month){ const key=`${h.name}|${year}-${month}`
 function monthRate(h, year, month){ const daysInMonth = new Date(year, month+1, 0).getDate(); let activeDays = 0, doneDays = 0; for(let d=1; d<=daysInMonth; d++){ const dk = formatDateKey(new Date(year, month, d)); if(isHabitActiveOn(h, dk)){ activeDays++; if(isHabitDone(dk, h.name)) doneDays++; } } return activeDays===0 ? 0 : doneDays/activeDays; }
 function habitAllTimeMonthlyMaxCached(h){ if(caches.monthlyMax.has(h.name)) return caches.monthlyMax.get(h.name); let max=0; for(let y=minYear;y<=maxYear;y++){ for(let m=0;m<12;m++){ const r=monthRateCached(h,y,m); if(r>max) max=r; } } caches.monthlyMax.set(h.name,max); return max; }
 
-function ensureYearRendered(y){ 
-    if(document.getElementById('year-'+y)) return; 
-    const el = document.createElement('section'); 
-    el.id='year-'+y; 
-    el.className='year-block rounded-full p-4'; 
+function expandedMonthCard(year, month){
+    return document.querySelector(`.month-task-card[data-year="${year}"][data-month="${month}"]`);
+}
+
+function refreshHomeMonthCard(year, month){
+    const current = expandedMonthCard(year, month);
+    if(!current) return null;
+    const replacement = makeHomeMonthCard(year, month);
+    current.replaceWith(replacement);
+    return replacement;
+}
+
+function scrollExpandedMonthIntoView(year, month, dateKey = null){
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        const card = expandedMonthCard(year, month);
+        if(!card) return;
+        const focusedDay = dateKey ? card.querySelector(`.compact-day[data-date-key="${dateKey}"]`) : null;
+        (focusedDay || card).scrollIntoView({ block:focusedDay ? 'center' : 'start', inline:'nearest', behavior:'smooth' });
+        if(!focusedDay) return;
+        const wrap = focusedDay.closest('.compact-calendar-wrap');
+        if(wrap){
+            const targetLeft = focusedDay.offsetLeft - (wrap.clientWidth - focusedDay.clientWidth) / 2;
+            wrap.scrollTo({ left:Math.max(0, targetLeft), behavior:'smooth' });
+        }
+        focusedDay.focus({ preventScroll:true });
+    }));
+}
+
+function openExpandedMonth(year, month, mode = 'habits', dateKey = null){
+    const previousMonthKey = expandedMonthKey;
+    expandedMonthKey = `${year}-${month}`;
+    expandedMonthMode = mode === 'tasks' ? 'tasks' : 'habits';
+    expandedMonthFocusDateKey = dateKey;
+    closeDayPanel();
+    if(previousMonthKey && previousMonthKey !== expandedMonthKey){
+        const [previousYear, previousMonth] = previousMonthKey.split('-').map(Number);
+        refreshHomeMonthCard(previousYear, previousMonth);
+    }
+    refreshHomeMonthCard(year, month);
+    scrollExpandedMonthIntoView(year, month, dateKey);
+}
+
+function setExpandedMonthMode(mode, year, month){
+    const nextMode = mode === 'tasks' ? 'tasks' : 'habits';
+    if(expandedMonthKey !== `${year}-${month}`) return openExpandedMonth(year, month, nextMode);
+    if(expandedMonthMode === nextMode) return;
+    expandedMonthMode = nextMode;
+    closeDayColorPicker();
+    refreshHomeMonthCard(year, month);
+    scrollExpandedMonthIntoView(year, month, expandedMonthFocusDateKey);
+}
+
+function closeExpandedMonth(year, month){
+    if(expandedMonthKey !== `${year}-${month}`) return;
+    expandedMonthKey = null;
+    expandedMonthFocusDateKey = null;
+    closeDayColorPicker();
+    refreshHomeMonthCard(year, month);
+    requestAnimationFrame(() => expandedMonthCard(year, month)?.scrollIntoView({ block:'center', inline:'nearest', behavior:'smooth' }));
+}
+
+function makeHomeMonthCard(y, m){
+    const expanded = expandedMonthKey === `${y}-${m}`;
+    const month=document.createElement('div');
+    month.className='p-3 rounded-lg bg-white/5 month-task-card';
+    month.dataset.year=y;
+    month.dataset.month=m;
+    month.classList.toggle('is-current-month', y === currentYear && m === currentMonth);
+    if(expanded) month.classList.add('compact-month-card','is-expanded');
+
+    const titleRow=document.createElement('div');
+    titleRow.className='month-title-row';
+    const mtitle=document.createElement('button');
+    mtitle.type='button';
+    mtitle.className='month-name-button';
+    mtitle.textContent=expanded ? monthNameLong(m) : monthNameShort(m);
+    mtitle.dataset.year=y;
+    mtitle.dataset.month=m;
+    mtitle.setAttribute('aria-label', `Voir le bilan de ${monthNameLong(m)} ${y}`);
+    mtitle.onclick=()=>openMonthModal(y,m);
+
+    if(expanded){
+        const controls=document.createElement('div');
+        controls.className='expanded-month-controls';
+        const modeToggle=document.createElement('div');
+        modeToggle.className='mobile-mode-toggle expanded-month-mode-toggle';
+        modeToggle.setAttribute('role', 'group');
+        modeToggle.setAttribute('aria-label', `Contenu de ${monthNameLong(m)} ${y}`);
+        const habitsMode=document.createElement('button');
+        habitsMode.type='button';
+        habitsMode.className='mobile-mode-option expanded-month-mode-option';
+        habitsMode.textContent='Habits';
+        habitsMode.setAttribute('aria-pressed', String(expandedMonthMode === 'habits'));
+        habitsMode.onclick=()=>setExpandedMonthMode('habits', y, m);
+        const tasksMode=document.createElement('button');
+        tasksMode.type='button';
+        tasksMode.className='mobile-mode-option expanded-month-mode-option';
+        tasksMode.textContent='Tasks';
+        tasksMode.setAttribute('aria-pressed', String(expandedMonthMode === 'tasks'));
+        tasksMode.onclick=()=>setExpandedMonthMode('tasks', y, m);
+        modeToggle.append(habitsMode, tasksMode);
+
+        const close=document.createElement('button');
+        close.type='button';
+        close.className='expanded-month-close';
+        close.setAttribute('aria-label', `Fermer ${monthNameLong(m)} ${y}`);
+        close.title='Fermer le mois';
+        close.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
+        close.onclick=()=>closeExpandedMonth(y,m);
+        controls.append(modeToggle, close);
+        titleRow.append(mtitle, controls);
+    } else {
+        const expand=document.createElement('button');
+        expand.type='button';
+        expand.className='month-expand-button';
+        expand.setAttribute('aria-label', `Développer ${monthNameLong(m)} ${y}`);
+        expand.title='Développer le mois';
+        expand.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        expand.onclick=()=>openExpandedMonth(y,m,'habits');
+        titleRow.append(mtitle, expand);
+    }
+    month.appendChild(titleRow);
+
+    if(expanded){
+        const meta=document.createElement('div');
+        meta.className='compact-month-meta';
+        meta.textContent=expandedMonthMeta(y,m,expandedMonthMode);
+        month.append(meta, makeCompactCalendarWrap(y,m,expandedMonthMode));
+    } else {
+        const weekdays=document.createElement('div');
+        weekdays.className='grid grid-cols-7 gap-1 mb-1 text-[9px] text-white/35 text-center';
+        ['L','M','M','J','V','S','D'].forEach(label=>{
+            const weekday=document.createElement('div');
+            weekday.textContent=label;
+            weekdays.appendChild(weekday);
+        });
+        month.appendChild(weekdays);
+        const days=document.createElement('div');
+        days.className='grid grid-cols-7 gap-1 text-xs text-white/80';
+        const first=new Date(y,m,1);
+        const total=new Date(y,m+1,0).getDate();
+        const offset=(first.getDay() + 6) % 7;
+        for(let i=0;i<offset;i++) days.appendChild(Object.assign(document.createElement('div'),{className:'text-white/10',innerHTML:'\u00A0'}));
+        for(let d=1; d<=total; d++){
+            const date=new Date(y,m,d);
+            const dk=formatDateKey(date);
+            const btn=document.createElement('button');
+            btn.className='day-cell text-[11px]';
+            btn.textContent=d;
+            btn.dataset.dateKey=dk;
+            btn.setAttribute('aria-label', parseDateKey(dk).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' }));
+            applyDayCellStyle(btn, dk);
+            if(dk===formatDateKey(new Date())){
+                btn.classList.add('ring-2','ring-white/10');
+                btn.setAttribute('aria-current', 'date');
+            }
+            btn.onclick=()=>openExpandedMonth(y,m,'habits',dk);
+            days.appendChild(btn);
+        }
+        month.appendChild(days);
+    }
+    return month;
+}
+
+function ensureYearRendered(y){
+    if(document.getElementById('year-'+y)) return;
+    const el = document.createElement('section');
+    el.id='year-'+y;
+    el.className='year-block rounded-full p-4';
     const title=document.createElement('h2');
     title.className='year-title';
     const titleButton=document.createElement('button');
@@ -743,105 +984,11 @@ function ensureYearRendered(y){
     titleButton.onclick=()=>openYearModal(y);
     title.appendChild(titleButton);
     el.appendChild(title);
-    const grid=document.createElement('div'); 
-    grid.className='grid month-grid gap-4'; 
-    for(let m=0;m<12;m++){
-        const monthKey = `${y}-${m}`;
-        const expanded = expandedTaskMonthKey === monthKey;
-        const month=document.createElement('div');
-        month.className='p-3 rounded-lg bg-white/5 month-task-card';
-        month.dataset.year=y;
-        month.dataset.month=m;
-        month.classList.toggle('is-current-month', y === currentYear && m === currentMonth);
-        if(expanded) month.classList.add('compact-month-card','is-expanded');
-
-        const titleRow=document.createElement('div');
-        titleRow.className='month-title-row';
-        const mtitle=document.createElement('button');
-        mtitle.type='button';
-        mtitle.className='month-name-button';
-        mtitle.textContent=monthNameShort(m);
-        mtitle.dataset.year=y;
-        mtitle.dataset.month=m;
-        mtitle.setAttribute('aria-label', `Voir le bilan de ${monthNameLong(m)} ${y}`);
-        mtitle.onclick=()=>openMonthModal(y,m);
-
-        const modeToggle=document.createElement('div');
-        modeToggle.className='mobile-mode-toggle month-mode-toggle';
-        modeToggle.setAttribute('role', 'group');
-        modeToggle.setAttribute('aria-label', `Contenu de ${monthNameLong(m)} ${y}`);
-        const habitsMode=document.createElement('button');
-        habitsMode.type='button';
-        habitsMode.className='mobile-mode-option month-mode-option';
-        habitsMode.textContent='Habits';
-        habitsMode.setAttribute('aria-label', `Habits — ${monthNameLong(m)} ${y}`);
-        habitsMode.setAttribute('aria-pressed', String(!expanded));
-        habitsMode.onclick=()=>{
-            if(!expanded) return;
-            expandedTaskMonthKey = null;
-            closeDayPanel();
-            renderYears();
-            requestAnimationFrame(()=>document.querySelector(`.month-task-card[data-year="${y}"][data-month="${m}"]`)?.scrollIntoView({block:'center', behavior:'smooth'}));
-        };
-        const tasksMode=document.createElement('button');
-        tasksMode.type='button';
-        tasksMode.className='mobile-mode-option month-mode-option';
-        tasksMode.textContent='Tasks';
-        tasksMode.setAttribute('aria-label', `Tasks — ${monthNameLong(m)} ${y}`);
-        tasksMode.setAttribute('aria-pressed', String(expanded));
-        tasksMode.onclick=()=>{
-            if(expanded) return;
-            expandedTaskMonthKey = monthKey;
-            closeDayPanel();
-            renderYears();
-            requestAnimationFrame(()=>document.querySelector(`.month-task-card[data-year="${y}"][data-month="${m}"]`)?.scrollIntoView({block:'center', behavior:'smooth'}));
-        };
-        modeToggle.append(habitsMode, tasksMode);
-        titleRow.append(mtitle, modeToggle);
-        month.appendChild(titleRow);
-
-        if(expanded){
-            const meta=document.createElement('div');
-            meta.className='compact-month-meta';
-            meta.textContent=compactMonthMeta(y,m);
-            month.append(meta, makeCompactCalendarWrap(y,m));
-        } else {
-            const weekdays=document.createElement('div');
-            weekdays.className='grid grid-cols-7 gap-1 mb-1 text-[9px] text-white/35 text-center';
-            ['L','M','M','J','V','S','D'].forEach(label=>{
-                const weekday=document.createElement('div');
-                weekday.textContent=label;
-                weekdays.appendChild(weekday);
-            });
-            month.appendChild(weekdays);
-            const days=document.createElement('div');
-            days.className='grid grid-cols-7 gap-1 text-xs text-white/80';
-            const first=new Date(y,m,1);
-            const total=new Date(y,m+1,0).getDate();
-            const offset=(first.getDay() + 6) % 7;
-            for(let i=0;i<offset;i++) days.appendChild(Object.assign(document.createElement('div'),{className:'text-white/10',innerHTML:'\u00A0'}));
-            for(let d=1; d<=total; d++){
-                const date=new Date(y,m,d);
-                const dk=formatDateKey(date);
-                const btn=document.createElement('button');
-                btn.className='day-cell text-[11px]';
-                btn.textContent=d;
-                btn.dataset.dateKey=dk;
-                btn.setAttribute('aria-label', parseDateKey(dk).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' }));
-                applyDayCellStyle(btn, dk);
-                if(dk===formatDateKey(new Date())){
-                    btn.classList.add('ring-2','ring-white/10');
-                    btn.setAttribute('aria-current', 'date');
-                }
-                btn.onclick=()=>openDayPanel(dk);
-                days.appendChild(btn);
-            }
-            month.appendChild(days);
-        }
-        grid.appendChild(month);
-    }
-    el.appendChild(grid); 
-    yearsContainer.appendChild(el); 
+    const grid=document.createElement('div');
+    grid.className='grid month-grid gap-4';
+    for(let m=0;m<12;m++) grid.appendChild(makeHomeMonthCard(y,m));
+    el.appendChild(grid);
+    yearsContainer.appendChild(el);
 }
 
 function tasksForDate(dateKey){
@@ -914,16 +1061,17 @@ function isPastDateKey(dateKey){
     return dateKey < formatDateKey(new Date());
 }
 
-function applyTaskDayAppearance(element, dateKey){
+function applyExpandedDayAppearance(element, dateKey, mode = null){
+    const resolvedMode = mode || element.closest('.compact-calendar-wrap')?.dataset.monthMode || 'tasks';
     element.dataset.dayColor = dayColorFor(dateKey);
-    element.classList.toggle('is-past', isPastDateKey(dateKey));
+    element.classList.toggle('is-past', resolvedMode === 'tasks' && isPastDateKey(dateKey));
 }
 
 async function setDayColor(dateKey, color){
     const nextColor = DAY_COLOR_CYCLE.includes(color) ? color : 'default';
     if(nextColor === 'default') delete data.dayColors[dateKey];
     else data.dayColors[dateKey] = nextColor;
-    document.querySelectorAll(`.compact-day[data-date-key="${dateKey}"]`).forEach(day => applyTaskDayAppearance(day, dateKey));
+    document.querySelectorAll(`.compact-day[data-date-key="${dateKey}"]`).forEach(day => applyExpandedDayAppearance(day, dateKey));
     if(focusedDateKey === dateKey) applyMobileDayAppearance(dateKey);
     await persistDebounced();
 }
@@ -1035,16 +1183,16 @@ async function moveTaskWithinDay(task, direction){
     const targetIndex = index + direction;
     if(index < 0 || targetIndex < 0 || targetIndex >= siblings.length) return;
     moveTaskToDayIndex(task, targetIndex);
-    await persistDebounced(0);
     rerenderTaskViews(task.date);
+    persistDebounced();
 }
 
 async function setTaskImportant(task, important){
     if(task.kind === 'separator') return;
     task.important = important;
     if(important) moveTaskToDayIndex(task, 0);
-    await persistDebounced(0);
     rerenderTaskViews(task.date);
+    persistDebounced();
 }
 
 function taskCompletionRate(dateKey){
@@ -1064,6 +1212,27 @@ function compactMonthMeta(year, month){
     const stats = taskMonthStats(year, month);
     if (!stats.total) return 'Aucune tâche';
     return `${stats.done}/${stats.total} terminées · ${Math.round(stats.rate * 100)}%`;
+}
+
+function habitMonthStats(year, month){
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    let total = 0;
+    let done = 0;
+    for(let day = 1; day <= totalDays; day++){
+        const dateKey = formatDateKey(new Date(year, month, day));
+        data.habits.filter(habit => isHabitActiveOn(habit, dateKey)).forEach(habit => {
+            total++;
+            if(isHabitDone(dateKey, habit.name)) done++;
+        });
+    }
+    return { total, done, rate:total ? done / total : 0 };
+}
+
+function expandedMonthMeta(year, month, mode){
+    if(mode === 'tasks') return compactMonthMeta(year, month);
+    const stats = habitMonthStats(year, month);
+    if(!stats.total) return 'Aucune habitude active';
+    return `${stats.done}/${stats.total} habitudes cochées · ${Math.round(stats.rate * 100)}%`;
 }
 
 const taskStatusLabel = {
@@ -1130,8 +1299,8 @@ async function deleteTaskDirect(task){
     const taskDate = task.date;
     rememberTaskRolloverSkip(task);
     data.tasks = data.tasks.filter(candidate => candidate.id !== task.id);
-    await persistDebounced(0);
     rerenderTaskViews(taskDate);
+    persistDebounced();
     showToast(task.kind === 'separator' ? 'Séparation supprimée.' : 'Tâche supprimée.');
 }
 
@@ -1416,8 +1585,8 @@ function makeCompactTaskRow(task){
         syncState();
         refreshCompactProgress(task.date);
         const carried = rollForwardLaterTasks();
-        await persistDebounced();
-        if(carried) rerenderTaskViews(task.date);
+        if(carried) rerenderTaskViews(task.date, { month:true });
+        persistDebounced();
     };
     bindTaskKeyboardShortcuts(button, task);
     bindTaskPointerGestures({ row, activationElement:button, swipeSurface:button, revealElement:swipeShell, task, rowSelector:'.compact-task-row', enableDrag:false, enableSwipe:true });
@@ -1428,47 +1597,82 @@ function makeCompactTaskRow(task){
 
 async function addCompactTask(dateKey){
     const dateLabel = parseDateKey(dateKey).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' });
-    const rawName = await requestTextInput({
-        title: 'Nouvelle tâche',
-        description: `${dateLabel} · laisse le nom vide pour créer une séparation.`,
-        placeholder: 'Nom de la tâche ou vide pour séparer',
-        confirmLabel: 'Ajouter'
+    const rawTasks = await requestTextInput({
+        title: 'Ajouter des tâches',
+        description: `${dateLabel} · une ligne = une tâche, une ligne vide = une séparation.`,
+        placeholder: 'Acheter les courses\nAppeler le garage\n\nPréparer la réunion',
+        confirmLabel: 'Ajouter la liste',
+        multiline: true
     });
-    if(rawName === null) return;
-    const name = rawName.trim().replace(/\s+/g, ' ');
-    if(!name){
-        data.tasks.push({ id: makeTaskId(), name: '', date: dateKey, kind: 'separator', status: TASK_STATUS.PENDING, important: false, groupBreakBefore: false, rolloverFromId: null, rolloverRootId: null });
-        await persistDebounced(0);
-        rerenderTaskViews(dateKey);
-        showToast('Séparation ajoutée.');
+    if(rawTasks === null) return;
+    const normalizedText = rawTasks.replace(/\r\n?/g, '\n');
+    const lines = normalizedText.split('\n');
+    if(lines.length > 1 && normalizedText.endsWith('\n')) lines.pop();
+    let addedTasks = 0;
+    let addedSeparators = 0;
+    let skippedDuplicates = 0;
+    lines.forEach(line => {
+        const name = line.trim().replace(/[ \t]+/g, ' ');
+        if(!name){
+            data.tasks.push({ id: makeTaskId(), name: '', date: dateKey, kind: 'separator', status: TASK_STATUS.PENDING, important: false, groupBreakBefore: false, rolloverFromId: null, rolloverRootId: null });
+            addedSeparators++;
+            return;
+        }
+        if(findTaskNameConflict(name, dateKey)){
+            skippedDuplicates++;
+            return;
+        }
+        data.tasks.push({ id: makeTaskId(), name, date: dateKey, kind: 'task', status: TASK_STATUS.PENDING, important: false, groupBreakBefore: false, rolloverFromId: null, rolloverRootId: null });
+        addedTasks++;
+    });
+    if(!addedTasks && !addedSeparators){
+        showToast('Toutes ces tâches existent déjà pour cette journée.', 'error');
         return;
     }
-    if(findTaskNameConflict(name, dateKey)){
-        showToast('Une tâche porte déjà ce nom pour cette journée.', 'error');
-        return;
-    }
-    data.tasks.push({ id: makeTaskId(), name, date: dateKey, kind: 'task', status: TASK_STATUS.PENDING, important: false, groupBreakBefore: false, rolloverFromId: null, rolloverRootId: null });
-    await persistDebounced(0);
     rerenderTaskViews(dateKey);
-    showToast('Tâche ajoutée à cette journée.');
+    persistDebounced();
+    const summary = [
+        addedTasks ? `${addedTasks} tâche${addedTasks > 1 ? 's' : ''}` : '',
+        addedSeparators ? `${addedSeparators} séparation${addedSeparators > 1 ? 's' : ''}` : ''
+    ].filter(Boolean).join(' et ');
+    showToast(`${summary} ajoutée${addedTasks + addedSeparators > 1 ? 's' : ''}.${skippedDuplicates ? ` ${skippedDuplicates} doublon${skippedDuplicates > 1 ? 's' : ''} ignoré${skippedDuplicates > 1 ? 's' : ''}.` : ''}`);
 }
 
-function rerenderTaskViews(dateKey){
+function rerenderTaskViews(dateKey, { month = false } = {}){
     if(!dayPage.classList.contains('hidden') && mobileDayMode === 'tasks'){
-        showDayPage(focusedDateKey || dateKey);
+        if((focusedDateKey || dateKey) === dateKey) populateMobileTasks(dateKey, dayHabitsList);
         return;
     }
-    renderYears();
+    const date = parseDateKey(dateKey);
+    const year = date.getFullYear();
+    const monthIndex = date.getMonth();
+    if(expandedMonthKey !== `${year}-${monthIndex}` || expandedMonthMode !== 'tasks') return;
+    const card = expandedMonthCard(year, monthIndex);
+    if(!card) return;
+    if(month){
+        const previousWrap = card.querySelector('.compact-calendar-wrap');
+        const scrollLeft = previousWrap?.scrollLeft || 0;
+        const replacement = makeCompactCalendarWrap(year, monthIndex, 'tasks');
+        previousWrap?.replaceWith(replacement);
+        replacement.scrollLeft = scrollLeft;
+    } else {
+        const currentDay = card.querySelector(`.compact-day[data-date-key="${dateKey}"]`);
+        currentDay?.replaceWith(makeCompactTaskDay(date));
+    }
+    const meta = card.querySelector('.compact-month-meta');
+    if(meta) meta.textContent = compactMonthMeta(year, monthIndex);
 }
 
-function makeCompactDay(date){
-    const dateKey = formatDateKey(date);
-    const day = document.createElement('div');
-    day.className = 'compact-day';
-    day.dataset.dateKey = dateKey;
-    applyTaskDayAppearance(day, dateKey);
+function decorateExpandedMonthDay(day, dateKey, mode){
+    applyExpandedDayAppearance(day, dateKey, mode);
     if(dateKey === formatDateKey(new Date())) day.classList.add('is-today');
+    if(dateKey === expandedMonthFocusDateKey){
+        day.classList.add('is-focused-day');
+        day.tabIndex = -1;
+    }
+}
 
+function makeCompactDayHead(date, dateKey, completionRate){
     const head = document.createElement('div');
     head.className = 'compact-day-head';
     const number = document.createElement('span');
@@ -1476,7 +1680,7 @@ function makeCompactDay(date){
     number.textContent = date.getDate();
     const rate = document.createElement('span');
     rate.className = 'compact-day-rate';
-    rate.textContent = `${Math.round(taskCompletionRate(dateKey) * 100)}%`;
+    rate.textContent = `${Math.round(completionRate * 100)}%`;
     const headTools = document.createElement('div');
     headTools.className = 'compact-day-head-tools';
     const color = document.createElement('button');
@@ -1489,6 +1693,16 @@ function makeCompactDay(date){
     bindDayColorPicker(color, dateKey, () => { color.dataset.dayColor = dayColorFor(dateKey); });
     headTools.append(rate, color);
     head.append(number, headTools);
+    return head;
+}
+
+function makeCompactTaskDay(date){
+    const dateKey = formatDateKey(date);
+    const day = document.createElement('div');
+    day.className = 'compact-day';
+    day.dataset.dateKey = dateKey;
+    decorateExpandedMonthDay(day, dateKey, 'tasks');
+    day.setAttribute('aria-label', `${date.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' })}, tâches`);
 
     const list = document.createElement('div');
     list.className = 'compact-task-list';
@@ -1501,13 +1715,53 @@ function makeCompactDay(date){
     add.setAttribute('aria-label', `Ajouter une tâche le ${date.toLocaleDateString('fr-FR')}`);
     add.onclick = () => addCompactTask(dateKey);
 
-    day.append(head, list, add);
+    day.append(makeCompactDayHead(date, dateKey, taskCompletionRate(dateKey)), list, add);
     return day;
 }
 
-function makeCompactCalendarWrap(year, month){
+function refreshExpandedHabitDay(dateKey){
+    if(expandedMonthMode !== 'habits') return;
+    const current = document.querySelector(`.compact-day[data-date-key="${dateKey}"]`);
+    if(current) current.replaceWith(makeCompactHabitDay(parseDateKey(dateKey)));
+    const date = parseDateKey(dateKey);
+    const card = expandedMonthCard(date.getFullYear(), date.getMonth());
+    const meta = card?.querySelector('.compact-month-meta');
+    if(meta) meta.textContent = expandedMonthMeta(date.getFullYear(), date.getMonth(), 'habits');
+}
+
+function makeCompactHabitDay(date){
+    const dateKey = formatDateKey(date);
+    const day = document.createElement('div');
+    day.className = 'compact-day compact-habit-day';
+    day.dataset.dateKey = dateKey;
+    decorateExpandedMonthDay(day, dateKey, 'habits');
+    day.setAttribute('aria-label', `${date.toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long' })}, habitudes`);
+
+    const list = document.createElement('div');
+    list.className = 'compact-habit-list';
+    const activeHabits = data.habits.filter(habit => isHabitActiveOn(habit, dateKey));
+    if(!activeHabits.length){
+        const empty = document.createElement('div');
+        empty.className = 'compact-habit-empty';
+        empty.textContent = 'Repos';
+        list.appendChild(empty);
+    } else {
+        activeHabits.forEach(habit => list.appendChild(makeHabitToggleButton(
+            habit,
+            dateKey,
+            () => refreshExpandedHabitDay(dateKey),
+            { isCompactMonth:true }
+        )));
+    }
+
+    day.append(makeCompactDayHead(date, dateKey, getCompletionRate(dateKey)), list);
+    return day;
+}
+
+function makeCompactCalendarWrap(year, month, mode = 'tasks'){
     const wrap = document.createElement('div');
     wrap.className = 'compact-calendar-wrap';
+    wrap.dataset.monthMode = mode;
     const calendar = document.createElement('div');
     calendar.className = 'compact-calendar';
     ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].forEach(dayName => {
@@ -1525,7 +1779,10 @@ function makeCompactCalendarWrap(year, month){
         calendar.appendChild(outside);
     }
     const total = new Date(year, month + 1, 0).getDate();
-    for(let day = 1; day <= total; day++) calendar.appendChild(makeCompactDay(new Date(year, month, day)));
+    for(let day = 1; day <= total; day++){
+        const date = new Date(year, month, day);
+        calendar.appendChild(mode === 'habits' ? makeCompactHabitDay(date) : makeCompactTaskDay(date));
+    }
     wrap.appendChild(calendar);
     return wrap;
 }
@@ -1656,12 +1913,14 @@ const makeStreakBadge=(cur,best,isBestNow)=>{ const span=document.createElement(
 
 let persistTimer = null;
 let persistResolvers = [];
-const persistDebounced = (delay = 250) => new Promise(resolve => {
+let lastLocalWriteRevision = -1;
+const persistDebounced = (delay = 450) => new Promise(resolve => {
     persistResolvers.push(resolve);
     clearTimeout(persistTimer);
     persistTimer = setTimeout(async () => {
         try {
             data._rev = (data._rev || 0) + 1;
+            lastLocalWriteRevision = data._rev;
             if(docRef) await setDoc(docRef, data);
         } catch(error){
             console.error('persist error', error);
@@ -1679,9 +1938,13 @@ let taskRolloverTimer = null;
 async function processTaskRollovers(){
     const created = rollForwardLaterTasks();
     if(!created) return 0;
-    await persistDebounced(0);
-    renderYears();
-    if(focusedDateKey && !dayPage.classList.contains('hidden')) showDayPage(focusedDateKey);
+    if(focusedDateKey && !dayPage.classList.contains('hidden') && mobileDayMode === 'tasks'){
+        populateMobileTasks(focusedDateKey, dayHabitsList);
+    } else if(expandedMonthKey && expandedMonthMode === 'tasks'){
+        const [year, month] = expandedMonthKey.split('-').map(Number);
+        rerenderTaskViews(formatDateKey(new Date(year, month, 1)), { month:true });
+    }
+    persistDebounced();
     return created;
 }
 
@@ -1700,15 +1963,31 @@ document.addEventListener('visibilitychange', () => {
 });
 
 function makeHabitToggleButton(h, dateKey, onChanged, opts = {}) {
-    const { isDayView = false } = opts;
+    const { isDayView = false, isCompactMonth = false } = opts;
     const done = isHabitDone(dateKey, h.name);
-    const width = isDayView ? ['w-4/5'] : ['w-auto'];
-    const textSize = isDayView ? 'text-xl' : 'text-xs';
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('aria-pressed', done ? 'true' : 'false');
-    btn.className = [ ...width,'px-4','py-3','rounded-full','border','transition', textSize,'font-semibold', done ? 'bg-[rgb(0,200,75)] border-green-400/40 ring-1 ring-green-300/30 text-black' : 'bg-white/5 border-white/10 hover:bg-white/10 text-white' ].join(' ');
-    btn.textContent = h.name;
+    if(isCompactMonth){
+        btn.className = 'compact-habit';
+        btn.dataset.status = done ? HABIT_STATUS.DONE : HABIT_STATUS.PENDING;
+        const name = document.createElement('span');
+        name.className = 'compact-habit-name';
+        name.textContent = h.name;
+        const current = computeStreakForHabit(h.name, dateKey);
+        const best = Math.max(h.bestStreak || 0, computeBestStreakCached(h.name));
+        const streak = document.createElement('span');
+        streak.className = 'compact-habit-streak';
+        streak.textContent = `${clamp3(current)}/${clamp3(best)}`;
+        streak.title = 'Série actuelle / meilleur record';
+        btn.append(name, streak);
+    } else {
+        const width = isDayView ? ['w-4/5'] : ['w-auto'];
+        const textSize = isDayView ? 'text-xl' : 'text-xs';
+        btn.className = [ ...width,'px-4','py-3','rounded-full','border','transition', textSize,'font-semibold', done ? 'bg-[rgb(0,200,75)] border-green-400/40 ring-1 ring-green-300/30 text-black' : 'bg-white/5 border-white/10 hover:bg-white/10 text-white' ].join(' ');
+        btn.textContent = h.name;
+    }
+    btn.setAttribute('aria-label', `${h.name}, ${done ? 'faite' : 'à faire'}. Appuyer pour ${done ? 'décocher' : 'cocher'}.`);
     btn.onclick = async () => {
     setHabitStatus(dateKey, h.name, done ? HABIT_STATUS.PENDING : HABIT_STATUS.DONE);
     const d = parseDateKey(dateKey);
@@ -1900,8 +2179,8 @@ function makeMobileTaskRow(task){
         task.status = TASK_STATUS_CYCLE[(currentIndex + 1) % TASK_STATUS_CYCLE.length];
         syncState();
         const carried = rollForwardLaterTasks();
-        await persistDebounced();
-        if(carried) rerenderTaskViews(task.date);
+        if(carried) rerenderTaskViews(task.date, { month:true });
+        persistDebounced();
     };
     bindTaskKeyboardShortcuts(button, task);
     main.append(button);
@@ -1935,6 +2214,7 @@ function populateMobileTasks(dateKey, container){
 
 function syncMobileDayMode(){
     const tasksMode=mobileDayMode === 'tasks';
+    dayPage.dataset.contentMode = mobileDayMode;
     mobileHabitsMode?.setAttribute('aria-pressed', String(!tasksMode));
     mobileTasksMode?.setAttribute('aria-pressed', String(tasksMode));
     syncPrimaryActionButton();
@@ -1983,7 +2263,7 @@ function showDayPage(dateKey){
     const rest = d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric' });
     dayTitle.innerHTML = `${month}<br>${rest}`;
     dayTitleSub.textContent=dateKey;
-    dayHabitsList.className='mb-4 space-y-3 flex flex-col items-center';
+    dayHabitsList.className='w-full max-w-2xl mx-auto mb-4 space-y-3 flex flex-col items-center';
     focusedDateKey=dateKey;
     applyMobileDayAppearance(dateKey);
     syncMobileDayMode();
@@ -2019,12 +2299,14 @@ async function toggleMobileLandscape(){
         }
         mobileLandscapeLocked=false;
         landscapeFullscreenOwned=false;
+        setMobileHeaderRevealed(false);
         syncOrientationButton();
         router();
         return;
     }
 
     mobileLandscapeLocked=true;
+    setMobileHeaderRevealed(false);
     syncOrientationButton();
     try {
         if(!screen.orientation?.lock) throw new Error('Orientation lock unsupported');
@@ -2042,6 +2324,7 @@ async function toggleMobileLandscape(){
         router();
     } catch(error){
         mobileLandscapeLocked=false;
+        setMobileHeaderRevealed(false);
         if(landscapeFullscreenOwned && document.fullscreenElement){
             try { await document.exitFullscreen(); } catch(exitError){}
         }
@@ -2418,6 +2701,7 @@ window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
     const small = isSmall();
+    if(!small) setMobileHeaderRevealed(false);
     syncOrientationButton();
     if (lastIsSmall === null || small !== lastIsSmall) {
         lastIsSmall = small;
@@ -2625,7 +2909,9 @@ authForm.addEventListener('submit', async (event) => {
   }
 
   authSubmitBusy = true;
+  const authSubmitLabel = authSubmit.textContent;
   authSubmit.disabled = true;
+  authSubmit.textContent = 'Connexion…';
   authCreate.disabled = true;
   try {
     await signInWithEmailAndPassword(auth, email, pass);
@@ -2636,6 +2922,7 @@ authForm.addEventListener('submit', async (event) => {
   } finally {
     authSubmitBusy = false;
     authSubmit.disabled = false;
+    authSubmit.textContent = authSubmitLabel;
     authCreate.disabled = false;
   }
 });
@@ -2741,6 +3028,7 @@ async function initFirebaseAll(){
     const nextUserId = user?.uid || null;
     if(previousUserId !== nextUserId){
         initialSynced = false;
+        lastLocalWriteRevision = -1;
         focusedDateKey = null;
         docRef = null;
         data = { habits: [], tasks: [], taskRolloverSkips: {}, dayColors: {}, completions: {}, _rev: 0 };
@@ -2766,6 +3054,8 @@ async function initFirebaseAll(){
     unsubSnap = onSnapshot(docRef, (snap)=>{
         if (snap.exists()){
         const server = snap.data();
+        const serverRevision = Number.isFinite(Number(server?._rev)) ? Number(server._rev) : 0;
+        if(initialSynced && (snap.metadata.hasPendingWrites || serverRevision <= lastLocalWriteRevision)) return;
         data = normalizeData(server);
         const carriedTaskCount = rollForwardLaterTasks();
         const migratedTaskGroups = Array.isArray(server.tasks) && server.tasks.some(task => task?.groupBreakBefore === true);
