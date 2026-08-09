@@ -22,7 +22,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#080808">
   
-  <link rel="stylesheet" href="./dist/style.css?v=20260809-1">
+  <link rel="stylesheet" href="./dist/style.css?v=20260809-4">
 
   <style>
     :root{
@@ -396,22 +396,14 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 .compact-habit-row {
   position:relative;
   display:grid;
-  grid-template-columns:auto minmax(0,1fr);
+  grid-template-columns:minmax(0,1fr);
   align-items:stretch;
-  gap:.25rem;
   min-width:0;
   isolation:isolate;
   animation:task-enter .22s cubic-bezier(.2,.8,.2,1) both;
 }
-.compact-habit-row.is-dragging { z-index:20; opacity:.78; transform:scale(1.018); filter:drop-shadow(0 12px 18px rgba(0,0,0,.34)); }
-.compact-habit-row.is-dragging .habit-drag-handle { color:#07150c; border-color:var(--green-soft); background:var(--green); }
-.habit-drag-handle { font-size:0; }
-.habit-drag-handle::before {
-  content:"";
-  width:.78rem;
-  height:.62rem;
-  background:linear-gradient(currentColor,currentColor) 0 0/100% 1px no-repeat,linear-gradient(currentColor,currentColor) 0 50%/100% 1px no-repeat,linear-gradient(currentColor,currentColor) 0 100%/100% 1px no-repeat;
-}
+.compact-habit-row.is-dragging,
+.mobile-habit-row.is-dragging { z-index:20; opacity:.78; transform:scale(1.018); filter:drop-shadow(0 12px 18px rgba(0,0,0,.34)); }
 .habit-swipe-shell,
 .mobile-habit-main {
   position:relative;
@@ -442,6 +434,13 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 }
 .compact-habit:hover { transform:translateY(-1px); border-color:rgba(255,255,255,.2); background:rgba(255,255,255,.09); }
 .compact-habit[data-status="done"] { color:#04150a; border-color:#68ef9c; background:rgba(49,216,116,.92); }
+.habit-toggle-button.is-best-streak {
+  color:#120f03 !important;
+  border-color:rgba(255,224,92,.72) !important;
+  background:linear-gradient(135deg,#f7dc67 0%,var(--gold) 48%,var(--gold-deep) 100%) !important;
+  box-shadow:inset 0 1px rgba(255,255,255,.38),0 5px 18px rgba(255,215,0,.2) !important;
+}
+.habit-toggle-button.is-best-streak:hover { filter:brightness(1.04); }
 .compact-habit-name { min-width:0; overflow-wrap:anywhere; }
 .compact-habit-streak { padding:.15rem .28rem; border-radius:999px; background:rgba(0,0,0,.18); font-size:.52rem; font-variant-numeric:tabular-nums; white-space:nowrap; opacity:.72; }
 .compact-habit-empty { padding:.55rem .35rem; color:rgba(255,255,255,.3); font-size:.6rem; text-align:center; }
@@ -449,7 +448,12 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 
 .mobile-day-mode { display: flex; justify-content: center; margin: 0; pointer-events: auto; }
 .mobile-mode-toggle {
-  display: inline-flex;
+  --mode-position:0;
+  position:relative;
+  isolation:isolate;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  overflow:hidden;
   padding: .2rem;
   border: 1px solid rgba(255,255,255,.14);
   border-radius: 999px;
@@ -458,23 +462,43 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
   backdrop-filter: blur(16px) saturate(125%);
   -webkit-backdrop-filter: blur(16px) saturate(125%);
   touch-action:pan-y;
-  transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease;
+  transition:border-color .18s ease, box-shadow .18s ease;
 }
-.mobile-mode-toggle.is-swipe-tracking { transform:translateX(var(--mode-swipe-shift, 0)); }
-.mobile-mode-toggle[data-swipe-target="habits"] { border-color:rgba(49,216,116,.28); box-shadow:-8px 0 22px rgba(49,216,116,.1), inset 0 1px rgba(255,255,255,.13); }
-.mobile-mode-toggle[data-swipe-target="tasks"] { border-color:rgba(49,216,116,.28); box-shadow:8px 0 22px rgba(49,216,116,.1), inset 0 1px rgba(255,255,255,.13); }
+.mobile-mode-toggle[data-selected-mode="tasks"] { --mode-position:1; }
+.mobile-mode-toggle::before {
+  content:"";
+  position:absolute;
+  z-index:0;
+  top:.2rem;
+  bottom:.2rem;
+  left:.2rem;
+  width:calc((100% - .4rem) / 2);
+  border:1px solid rgba(104,239,156,.2);
+  border-radius:999px;
+  background:linear-gradient(145deg,rgba(49,216,116,.58),rgba(28,171,88,.48));
+  box-shadow:inset 0 1px rgba(255,255,255,.2),0 4px 14px rgba(49,216,116,.13);
+  transform:translate3d(calc(var(--mode-position, 0) * 100%),0,0);
+  transition:transform .26s cubic-bezier(.22,.8,.24,1),background .18s ease,box-shadow .18s ease;
+  will-change:transform;
+  pointer-events:none;
+}
+.mobile-mode-toggle.is-swipe-tracking { border-color:rgba(49,216,116,.26); box-shadow:0 8px 24px rgba(0,0,0,.16),inset 0 1px rgba(255,255,255,.13),0 0 0 1px rgba(49,216,116,.05); }
+.mobile-mode-toggle.is-swipe-tracking::before { transition:none; }
 .mobile-mode-option {
+  position:relative;
+  z-index:1;
   min-width: 5.7rem;
   padding: .42rem .72rem;
   border-radius: 999px;
   color: rgba(255,255,255,.52);
   font-size: .7rem;
   font-weight: 800;
-  transition: color .16s ease, background .16s ease, box-shadow .16s ease;
+  background:transparent;
+  transition:color .18s ease,text-shadow .18s ease;
 }
-.mobile-mode-option:hover { color: rgba(255,255,255,.86); background: rgba(255,255,255,.055); }
-.mobile-mode-option[aria-pressed="true"] { color: #edfff4; background: rgba(49,216,116,.5); box-shadow: inset 0 1px rgba(255,255,255,.17), 0 3px 12px rgba(49,216,116,.12); }
-.mobile-mode-option[aria-pressed="true"]:hover { color:#fff; background:rgba(49,216,116,.58); }
+.mobile-mode-option:hover { color:rgba(255,255,255,.86); }
+.mobile-mode-option[aria-pressed="true"] { color:#edfff4; text-shadow:0 1px 8px rgba(5,40,20,.35); }
+.mobile-mode-option[aria-pressed="true"]:hover { color:#fff; }
 .mobile-task-button[data-status="done"] { color: #04150a; background: rgba(49,216,116,.92); border-color: #68ef9c; }
 .mobile-task-button[data-status="later"] { color: var(--task-later-ink); background: linear-gradient(135deg, rgba(200,133,98,.92), rgba(165,103,76,.9)); border-color: var(--task-later-border); }
 .mobile-task-button[data-status="skipped"] { color: #210606; background: rgba(240,82,82,.9); border-color: #ff8d8d; }
@@ -729,29 +753,7 @@ button:active:not(:disabled) { transform: scale(.97); }
 @keyframes page-enter { from { opacity: 0; } to { opacity: 1; } }
 @keyframes modal-enter { from { opacity: 0; transform: translateY(.7rem) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
-.compact-task-row { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: stretch; isolation: isolate; }
-.task-drag-handle,
-.habit-drag-handle {
-  display: grid;
-  place-items: center;
-  width: 1.55rem;
-  min-height: 2rem;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: .45rem;
-  background: rgba(255,255,255,.045);
-  color: rgba(255,255,255,.48);
-  font-size: .78rem;
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-}
-.task-drag-handle:hover,
-.task-drag-handle:focus-visible,
-.habit-drag-handle:hover,
-.habit-drag-handle:focus-visible { color:#fff; border-color:rgba(49,216,116,.38); background:rgba(49,216,116,.11); }
-.task-drag-handle:active,
-.habit-drag-handle:active { cursor:grabbing; }
+.compact-task-row { display:grid; grid-template-columns:minmax(0,1fr); align-items:stretch; isolation:isolate; }
 .task-swipe-shell,
 .mobile-task-main {
   position: relative;
@@ -803,16 +805,10 @@ button:active:not(:disabled) { transform: scale(.97); }
   transition: opacity .12s ease, background .16s ease, color .16s ease, box-shadow .16s ease, font-size .16s ease;
   pointer-events: none;
 }
-.habit-swipe-shell[data-swipe-direction="edit"][data-swipe-side="right"]::before,
-.mobile-habit-main[data-swipe-direction="edit"][data-swipe-side="right"]::before { content:"✎"; justify-content:flex-start; padding-left:.85rem; opacity:1; }
-.habit-swipe-shell[data-swipe-direction="edit"][data-swipe-side="left"]::before,
-.mobile-habit-main[data-swipe-direction="edit"][data-swipe-side="left"]::before { content:"✎"; justify-content:flex-end; padding-right:.85rem; opacity:1; }
-.habit-swipe-shell[data-swipe-direction="edit"][data-swipe-ready="true"]::before,
-.mobile-habit-main[data-swipe-direction="edit"][data-swipe-ready="true"]::before {
-  color:#effff5;
-  background:rgba(49,216,116,.62);
-  box-shadow:inset 0 0 0 2px rgba(255,255,255,.16);
-}
+.habit-swipe-shell[data-swipe-direction="delete"][data-swipe-side="right"]::before,
+.mobile-habit-main[data-swipe-direction="delete"][data-swipe-side="right"]::before { content:"✕"; justify-content:flex-start; padding-left:.85rem; opacity:1; }
+.habit-swipe-shell[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="right"]::before,
+.mobile-habit-main[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="right"]::before { color:#fff; background:linear-gradient(90deg,rgba(239,68,68,.98),rgba(127,29,29,.8)); }
 .task-swipe-shell[data-swipe-direction="delete"][data-swipe-side="right"]::before,
 .mobile-task-main[data-swipe-direction="delete"][data-swipe-side="right"]::before { content: "✕"; justify-content: flex-start; padding-left: .85rem; opacity: 1; }
 .task-swipe-shell[data-swipe-direction="delete"][data-swipe-side="left"]::before,
@@ -840,8 +836,11 @@ button:active:not(:disabled) { transform: scale(.97); }
 .is-swipe-committing { pointer-events: none; }
 .compact-task-row.is-dragging,
 .mobile-task-row.is-dragging { z-index: 20; opacity: .78; transform: scale(1.018); filter: drop-shadow(0 12px 18px rgba(0,0,0,.34)); }
-.compact-task-row.is-dragging .task-drag-handle { color: #07150c; border-color: #68ef9c; background: #31d874; }
-.task-separator-row { grid-template-columns: auto minmax(0,1fr); align-items: center; animation: separator-enter .2s ease both; }
+.compact-task-row.is-dragging .compact-task,
+.mobile-task-row.is-dragging .mobile-task-button,
+.compact-habit-row.is-dragging .compact-habit,
+.mobile-habit-row.is-dragging .habit-day-button { box-shadow:0 0 0 2px rgba(49,216,116,.3),0 10px 24px rgba(0,0,0,.24); }
+.task-separator-row { grid-template-columns:minmax(0,1fr); align-items:center; animation:separator-enter .2s ease both; }
 .task-separator-swipe-shell { border-radius: 999px; }
 .task-separator-line,
 .mobile-task-separator {
@@ -889,9 +888,6 @@ button:active:not(:disabled) { transform: scale(.97); }
   .month-task-card.is-expanded .compact-calendar-wrap { overflow-x:hidden; }
   .month-task-card.is-expanded .compact-calendar { min-width:100%; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.35rem; }
   .month-task-card.is-expanded .compact-day { min-width:0; }
-  .compact-habit-row { grid-template-columns:.8rem minmax(0,1fr); gap:.12rem; }
-  .compact-habit-row .habit-drag-handle { width:.8rem; min-width:0; padding:0; border-color:transparent; background:transparent; }
-  .compact-habit-row .habit-drag-handle::before { width:.5rem; }
   .compact-habit { grid-template-columns:minmax(0,1fr); min-height:1.75rem; padding:.28rem .24rem; font-size:.54rem; }
   .compact-habit-name { display:-webkit-box; overflow:hidden; overflow-wrap:normal; word-break:normal; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
   .compact-habit-streak { display:none; }
@@ -1009,9 +1005,9 @@ button:active:not(:disabled) { transform: scale(.97); }
     <!-- Les contrôles du jour restent groupés et accessibles sans créer un second scroll. -->
     <div class="day-bottom-stack">
       <div class="mobile-day-mode">
-        <div id="mobileDayModeToggle" class="mobile-mode-toggle" role="group" aria-label="Contenu du jour">
-          <button id="mobileHabitsMode" type="button" class="mobile-mode-option" aria-pressed="true">Habits</button>
-          <button id="mobileTasksMode" type="button" class="mobile-mode-option" aria-pressed="false">Tasks</button>
+        <div id="mobileDayModeToggle" class="mobile-mode-toggle" role="group" aria-label="Contenu du jour" data-selected-mode="habits">
+          <button id="mobileHabitsMode" type="button" class="mobile-mode-option" data-mode="habits" aria-pressed="true">Habits</button>
+          <button id="mobileTasksMode" type="button" class="mobile-mode-option" data-mode="tasks" aria-pressed="false">Tasks</button>
         </div>
       </div>
       <div class="day-bottom-nav flex items-center justify-center">
@@ -1304,6 +1300,6 @@ button:active:not(:disabled) { transform: scale(.97); }
   <script src="./dist/html2canvas-pro.min.js?v=20260803-1" defer
           onload="document.documentElement.dataset.pngExporter='ready'"
           onerror="document.documentElement.dataset.pngExporter='error'"></script>
-  <script type="module" src="./app.js?v=20260809-1"></script>
+  <script type="module" src="./app.js?v=20260809-4"></script>
 </body>
 </html>

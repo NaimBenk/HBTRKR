@@ -833,23 +833,24 @@ function makeHomeMonthCard(y, m){
         modeToggle.className='mobile-mode-toggle expanded-month-mode-toggle';
         modeToggle.setAttribute('role', 'group');
         modeToggle.setAttribute('aria-label', `Contenu de ${monthNameLong(m)} ${y}`);
+        modeToggle.dataset.selectedMode=expandedMonthMode;
         const habitsMode=document.createElement('button');
         habitsMode.type='button';
         habitsMode.className='mobile-mode-option expanded-month-mode-option';
+        habitsMode.dataset.mode='habits';
         habitsMode.textContent='Habits';
         habitsMode.setAttribute('aria-pressed', String(expandedMonthMode === 'habits'));
-        habitsMode.onclick=()=>setExpandedMonthMode('habits', y, m);
         const tasksMode=document.createElement('button');
         tasksMode.type='button';
         tasksMode.className='mobile-mode-option expanded-month-mode-option';
+        tasksMode.dataset.mode='tasks';
         tasksMode.textContent='Tasks';
         tasksMode.setAttribute('aria-pressed', String(expandedMonthMode === 'tasks'));
-        tasksMode.onclick=()=>setExpandedMonthMode('tasks', y, m);
         modeToggle.append(habitsMode, tasksMode);
         bindModeToggleSwipe(
             modeToggle,
-            () => setExpandedMonthMode('tasks', y, m),
-            () => setExpandedMonthMode('habits', y, m)
+            mode => setExpandedMonthMode(mode, y, m),
+            { commitDelay:180 }
         );
 
         const close=document.createElement('button');
@@ -1198,6 +1199,29 @@ function findTaskNameConflict(name, dateKey, excludedTask = null){
     return data.tasks.find(task => task.kind !== 'separator' && task !== excludedTask && task.date === dateKey && normalizeHabitName(task.name) === normalized) || null;
 }
 
+async function renameTask(task){
+    if(!task || task.kind === 'separator') return false;
+    const proposed = await requestTextInput({
+        title:'Renommer la tâche',
+        description:'Le nom doit rester unique pour cette journée.',
+        value:task.name,
+        placeholder:'Nom de la tâche',
+        confirmLabel:'Enregistrer'
+    });
+    if(proposed === null) return false;
+    const nextName = proposed.trim().replace(/\s+/g, ' ');
+    if(!nextName || nextName === task.name) return false;
+    if(findTaskNameConflict(nextName, task.date, task)){
+        showToast('Cette tâche existe déjà pour cette journée.', 'error');
+        return false;
+    }
+    task.name = nextName;
+    rerenderTaskViews(task.date);
+    persistDebounced(0);
+    showToast('Tâche renommée.');
+    return true;
+}
+
 function refreshCompactProgress(dateKey){
     const dayCell = document.querySelector(`.compact-day[data-date-key="${dateKey}"]`);
     if(dayCell){
@@ -1286,10 +1310,13 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
         delete reveal.dataset.swipeReady;
     };
     const finishDrag = () => {
-        if(!pointerState?.dragging) return;
+        if(!pointerState?.dragging) return false;
         row.classList.remove('is-dragging');
         activationElement.style.touchAction = '';
-        persistRenderedTaskOrder(row.parentElement, rowSelector, task.date);
+        const finalIndex = Array.from(row.parentElement.querySelectorAll(rowSelector)).indexOf(row);
+        const moved = finalIndex !== pointerState.startIndex;
+        if(moved) persistRenderedTaskOrder(row.parentElement, rowSelector, task.date);
+        return moved;
     };
     const clearGesture = () => {
         clearTimeout(holdTimer);
@@ -1382,9 +1409,10 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
         clearTimeout(holdTimer);
         const deltaX = event.clientX - pointerState.startX;
         if(pointerState.dragging){
-            finishDrag();
+            const moved = finishDrag();
             releaseTaskClickSuppression(row);
             clearGesture();
+            if(!moved && task.kind !== 'separator') await renameTask(task);
             return;
         }
         if(pointerState.swiping){
@@ -1426,6 +1454,7 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
             startY:event.clientY,
             lastX:event.clientX,
             lastY:event.clientY,
+            startIndex:Array.from(row.parentElement.querySelectorAll(rowSelector)).indexOf(row),
             dragging:false,
             swiping:false,
             action:null,
@@ -1448,24 +1477,6 @@ function bindTaskPointerGestures({ row, activationElement, swipeSurface, revealE
     });
 }
 
-function makeTaskDragHandle(task, row, rowSelector){
-    const handle = document.createElement('button');
-    handle.type = 'button';
-    handle.className = 'task-drag-handle';
-    handle.textContent = '☰';
-    handle.setAttribute('aria-label', task.kind === 'separator' ? 'Déplacer la séparation' : `Déplacer ${task.name}`);
-    handle.title = 'Maintenir puis glisser';
-    handle.addEventListener('keydown', event => {
-        if(event.key === 'ArrowUp' || event.key === 'ArrowDown'){
-            event.preventDefault();
-            moveTaskWithinDay(task, event.key === 'ArrowUp' ? -1 : 1);
-        }
-        if(event.key === 'Delete' && task.kind === 'separator') deleteTaskDirect(task);
-    });
-    bindTaskPointerGestures({ row, activationElement:handle, task, rowSelector, holdDelay:150, enableSwipe:false, dragOnMove:true });
-    return handle;
-}
-
 function bindTaskKeyboardShortcuts(button, task){
     button.addEventListener('keydown', event => {
         if(event.key === 'Delete'){
@@ -1485,7 +1496,6 @@ function makeCompactSeparatorRow(task){
     const row = document.createElement('div');
     row.className = 'compact-task-row task-separator-row';
     row.dataset.taskId = task.id;
-    const handle = makeTaskDragHandle(task, row, '.compact-task-row');
     const swipeShell = document.createElement('div');
     swipeShell.className = 'task-swipe-shell task-separator-swipe-shell';
     const separator = document.createElement('button');
@@ -1494,9 +1504,9 @@ function makeCompactSeparatorRow(task){
     separator.setAttribute('aria-label', 'Séparation. Glisser à gauche ou à droite pour supprimer.');
     separator.innerHTML = '<span></span><span></span>';
     bindTaskKeyboardShortcuts(separator, task);
-    bindTaskPointerGestures({ row, activationElement:separator, swipeSurface:separator, revealElement:swipeShell, task, rowSelector:'.compact-task-row', enableDrag:false, enableSwipe:true });
+    bindTaskPointerGestures({ row, activationElement:separator, swipeSurface:separator, revealElement:swipeShell, task, rowSelector:'.compact-task-row', enableDrag:true, enableSwipe:true });
     swipeShell.append(separator);
-    row.append(handle, swipeShell);
+    row.append(swipeShell);
     return row;
 }
 
@@ -1507,7 +1517,6 @@ function makeCompactTaskRow(task){
     row.dataset.taskId = task.id;
     row.classList.toggle('is-important', task.important);
 
-    const handle = makeTaskDragHandle(task, row, '.compact-task-row');
     const swipeShell = document.createElement('div');
     swipeShell.className = 'task-swipe-shell';
     const button = document.createElement('button');
@@ -1535,9 +1544,9 @@ function makeCompactTaskRow(task){
         persistDebounced();
     };
     bindTaskKeyboardShortcuts(button, task);
-    bindTaskPointerGestures({ row, activationElement:button, swipeSurface:button, revealElement:swipeShell, task, rowSelector:'.compact-task-row', enableDrag:false, enableSwipe:true });
+    bindTaskPointerGestures({ row, activationElement:button, swipeSurface:button, revealElement:swipeShell, task, rowSelector:'.compact-task-row', enableDrag:true, enableSwipe:true });
     swipeShell.appendChild(button);
-    row.append(handle, swipeShell);
+    row.append(swipeShell);
     return row;
 }
 
@@ -1678,11 +1687,11 @@ function refreshExpandedHabitDay(dateKey){
 function makeCompactHabitRow(habit, dateKey){
     const date = parseDateKey(dateKey);
     const refreshMonth = () => refreshHomeMonthCard(date.getFullYear(), date.getMonth());
+    const refreshAllMonths = () => renderYears();
     const row = document.createElement('div');
     row.className = 'compact-habit-row';
     row.dataset.habitRow = '';
     row.dataset.habitName = habit.name;
-    const handle = makeHabitDragHandle(habit, row, '.compact-habit-row', refreshMonth);
     const swipeShell = document.createElement('div');
     swipeShell.className = 'habit-swipe-shell';
     const button = makeHabitToggleButton(
@@ -1697,14 +1706,16 @@ function makeCompactHabitRow(habit, dateKey){
         swipeSurface:button,
         revealElement:swipeShell,
         habit,
+        dateKey,
         rowSelector:'.compact-habit-row',
-        enableDrag:false,
+        enableDrag:true,
         enableSwipe:true,
         onEdited:refreshMonth,
+        onDeleted:refreshAllMonths,
         onReordered:refreshMonth
     });
     swipeShell.appendChild(button);
-    row.append(handle, swipeShell);
+    row.append(swipeShell);
     return row;
 }
 
@@ -1942,6 +1953,9 @@ document.addEventListener('visibilitychange', () => {
 function makeHabitToggleButton(h, dateKey, onChanged, opts = {}) {
     const { isDayView = false, isCompactMonth = false } = opts;
     const done = isHabitDone(dateKey, h.name);
+    const currentStreak = computeStreakForHabit(h.name, dateKey);
+    const bestStreak = Math.max(h.bestStreak || 0, computeBestStreakCached(h.name));
+    const isBestStreak = currentStreak > 0 && currentStreak >= bestStreak;
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('aria-pressed', done ? 'true' : 'false');
@@ -1951,11 +1965,9 @@ function makeHabitToggleButton(h, dateKey, onChanged, opts = {}) {
         const name = document.createElement('span');
         name.className = 'compact-habit-name';
         name.textContent = h.name;
-        const current = computeStreakForHabit(h.name, dateKey);
-        const best = Math.max(h.bestStreak || 0, computeBestStreakCached(h.name));
         const streak = document.createElement('span');
         streak.className = 'compact-habit-streak';
-        streak.textContent = `${clamp3(current)}/${clamp3(best)}`;
+        streak.textContent = `${clamp3(currentStreak)}/${clamp3(bestStreak)}`;
         streak.title = 'Série actuelle / meilleur record';
         btn.append(name, streak);
     } else {
@@ -1965,7 +1977,10 @@ function makeHabitToggleButton(h, dateKey, onChanged, opts = {}) {
         if(isDayView) btn.classList.add('habit-day-button');
         btn.textContent = h.name;
     }
-    btn.setAttribute('aria-label', `${h.name}, ${done ? 'faite' : 'à faire'}. Appuyer pour ${done ? 'décocher' : 'cocher'}.`);
+    btn.classList.add('habit-toggle-button');
+    btn.classList.toggle('is-best-streak', isBestStreak);
+    btn.dataset.bestStreak = String(isBestStreak);
+    btn.setAttribute('aria-label', `${h.name}, ${done ? 'faite' : 'à faire'}${isBestStreak ? ', meilleure série en cours' : ''}. Appuyer pour ${done ? 'décocher' : 'cocher'}.`);
     btn.onclick = async () => {
     const row = btn.closest('[data-habit-row]');
     if(row?.dataset.suppressClick === 'true') return;
@@ -2005,11 +2020,26 @@ async function renameHabit(habit, onChanged){
     }
     clearHabitCaches(oldName);
     clearHabitCaches(newName);
-    await persistDebounced(0);
     if(typeof onChanged === 'function') onChanged();
     else renderYears();
+    persistDebounced(0);
     showToast('Habitude renommée.');
     return true;
+}
+
+async function deleteHabitFromDate(habit, dateKey, onChanged){
+    const cut = isValidDateKey(dateKey) ? dateKey : formatDateKey(new Date());
+    if(!habit.deletedAt || cmpDateStr(cut, habit.deletedAt) < 0) habit.deletedAt = cut;
+    for(const completionDate of Object.keys(data.completions)){
+        if(cmpDateStr(completionDate, cut) < 0 || !data.completions[completionDate]?.[habit.name]) continue;
+        delete data.completions[completionDate][habit.name];
+        if(Object.keys(data.completions[completionDate]).length === 0) delete data.completions[completionDate];
+    }
+    clearHabitCaches(habit.name);
+    if(typeof onChanged === 'function') onChanged();
+    else renderYears();
+    persistDebounced(0);
+    showToast('Habitude supprimée à partir de cette date.');
 }
 
 function applyHabitOrder(orderedNames){
@@ -2032,7 +2062,7 @@ function persistRenderedHabitOrder(container, rowSelector, onReordered){
     if(typeof onReordered === 'function') requestAnimationFrame(onReordered);
 }
 
-function bindHabitPointerGestures({ row, activationElement, swipeSurface, revealElement, habit, rowSelector, holdDelay=320, enableDrag=true, enableSwipe=true, dragOnMove=false, onEdited, onReordered }){
+function bindHabitPointerGestures({ row, activationElement, swipeSurface, revealElement, habit, dateKey, rowSelector, holdDelay=320, enableDrag=true, enableSwipe=true, dragOnMove=false, onEdited, onDeleted, onReordered }){
     let state = null;
     let holdTimer = null;
     const surface = swipeSurface || activationElement;
@@ -2042,6 +2072,7 @@ function bindHabitPointerGestures({ row, activationElement, swipeSurface, reveal
     const releaseClick = () => window.setTimeout(() => { delete row.dataset.suppressClick; }, 120);
     const resetSwipe = () => {
         surface.style.transform = '';
+        surface.style.opacity = '';
         row.classList.remove('is-swiping', 'is-swipe-ready');
         delete reveal.dataset.swipeDirection;
         delete reveal.dataset.swipeSide;
@@ -2065,28 +2096,49 @@ function bindHabitPointerGestures({ row, activationElement, swipeSurface, reveal
         navigator.vibrate?.(12);
     };
     const finishDrag = () => {
-        if(!state?.dragging) return;
+        if(!state?.dragging) return false;
         row.classList.remove('is-dragging');
-        persistRenderedHabitOrder(row.parentElement, rowSelector, onReordered);
+        const finalIndex = Array.from(row.parentElement.querySelectorAll(rowSelector)).indexOf(row);
+        const moved = finalIndex !== state.startIndex;
+        if(moved) persistRenderedHabitOrder(row.parentElement, rowSelector, onReordered);
+        return moved;
     };
     const updateSwipe = deltaX => {
-        const distance = Math.abs(deltaX);
-        const side = deltaX > 0 ? 'right' : 'left';
+        if(deltaX <= 0){
+            surface.style.transform = `translate3d(${Math.max(-16, deltaX * .14)}px,0,0)`;
+            row.classList.add('is-swiping');
+            row.classList.remove('is-swipe-ready');
+            state.action = null;
+            delete reveal.dataset.swipeDirection;
+            delete reveal.dataset.swipeSide;
+            delete reveal.dataset.swipeReady;
+            return;
+        }
+        const distance = deltaX;
         const ready = distance >= state.activationThreshold;
         surface.style.transform = `translate3d(${deltaX}px,0,0)`;
         row.classList.add('is-swiping');
         row.classList.toggle('is-swipe-ready', ready);
+        state.action = 'delete';
         if(distance < state.revealThreshold){
             delete reveal.dataset.swipeDirection;
             delete reveal.dataset.swipeSide;
             delete reveal.dataset.swipeReady;
             return;
         }
-        reveal.dataset.swipeDirection = 'edit';
-        reveal.dataset.swipeSide = side;
+        reveal.dataset.swipeDirection = 'delete';
+        reveal.dataset.swipeSide = 'right';
         reveal.dataset.swipeReady = String(ready);
         if(ready !== state.thresholdReady) navigator.vibrate?.(ready ? 10 : 4);
         state.thresholdReady = ready;
+    };
+    const animateSwipeDelete = async () => {
+        const exitDistance = Math.max(window.innerWidth, reveal.getBoundingClientRect().width * 1.35);
+        surface.style.transform = `translate3d(${exitDistance}px,0,0)`;
+        surface.style.opacity = '0';
+        row.classList.add('is-swipe-committing');
+        await new Promise(resolve => window.setTimeout(resolve, 150));
+        await deleteHabitFromDate(habit, dateKey, onDeleted);
     };
     const onPointerMove = event => {
         if(!state || state.id !== event.pointerId) return;
@@ -2119,17 +2171,22 @@ function bindHabitPointerGestures({ row, activationElement, swipeSurface, reveal
         clearTimeout(holdTimer);
         const deltaX = event.clientX - state.startX;
         if(state.dragging){
-            finishDrag();
+            const moved = finishDrag();
             releaseClick();
             clearGesture();
+            if(!moved) await renameHabit(habit, onEdited);
             return;
         }
         if(state.swiping){
-            const shouldEdit = Math.abs(deltaX) >= state.activationThreshold;
+            const shouldDelete = deltaX >= state.activationThreshold && state.action === 'delete';
+            if(shouldDelete){
+                clearGesture();
+                await animateSwipeDelete();
+                return;
+            }
             resetSwipe();
             releaseClick();
             clearGesture();
-            if(shouldEdit) await renameHabit(habit, onEdited);
             return;
         }
         clearGesture();
@@ -2149,8 +2206,10 @@ function bindHabitPointerGestures({ row, activationElement, swipeSurface, reveal
             pointerType:event.pointerType,
             startX:event.clientX,
             startY:event.clientY,
+            startIndex:Array.from(row.parentElement.querySelectorAll(rowSelector)).indexOf(row),
             dragging:false,
             swiping:false,
+            action:null,
             thresholdReady:false,
             revealThreshold:Math.min(38, Math.max(24, width * .09)),
             activationThreshold:Math.min(88, Math.max(58, width * .23))
@@ -2166,16 +2225,6 @@ function bindHabitPointerGestures({ row, activationElement, swipeSurface, reveal
         };
         if(enableDrag) holdTimer = window.setTimeout(startDrag, holdDelay);
     });
-}
-
-function makeHabitDragHandle(habit, row, rowSelector, onReordered){
-    const handle = document.createElement('button');
-    handle.type = 'button';
-    handle.className = 'habit-drag-handle';
-    handle.setAttribute('aria-label', `Déplacer ${habit.name}`);
-    handle.title = 'Maintenir puis glisser';
-    bindHabitPointerGestures({ row, activationElement:handle, habit, rowSelector, holdDelay:150, enableSwipe:false, dragOnMove:true, onReordered });
-    return handle;
 }
 
 function enableDragSort(container){
@@ -2232,17 +2281,20 @@ function populateHabits(dateKey, container, minimal=false){
             swipeSurface:button,
             revealElement:main,
             habit:h,
+            dateKey,
             rowSelector:'.mobile-habit-row',
             enableDrag:true,
             enableSwipe:true,
-            onEdited:rerenderSelf
+            onEdited:rerenderSelf,
+            onDeleted:()=>{ rerenderSelf(); renderYears(); },
+            onReordered:rerenderSelf
         });
         container.appendChild(row);
     });
     if(isDayContainer){
         const hint=document.createElement('div');
         hint.className='mobile-task-gesture-hint mobile-habit-gesture-hint';
-        hint.textContent='Maintenir pour déplacer · glisser pour modifier';
+        hint.textContent='Maintenir : déplacer ou renommer · → supprimer';
         container.appendChild(hint);
     }
     return;
@@ -2278,26 +2330,7 @@ function populateHabits(dateKey, container, minimal=false){
         const del = document.createElement('button');
         del.className = 'text-xs px-2 py-1 rounded hover:bg-white/5';
         del.textContent = '🗑️';
-        del.onclick = async ()=>{
-        const cut = dateKey;
-
-        if (!h.deletedAt || cmpDateStr(cut, h.deletedAt) < 0) {
-            h.deletedAt = cut;
-        }
-
-        for (const k of Object.keys(data.completions)) {
-            if (cmpDateStr(k, cut) >= 0 && data.completions[k] && data.completions[k][h.name]) {
-            delete data.completions[k][h.name];
-            if (Object.keys(data.completions[k]).length === 0) delete data.completions[k];
-            }
-        }
-
-        clearHabitCaches(h.name);
-        await persistDebounced(0);
-
-        rerenderSelf();
-        renderYears();
-        };
+        del.onclick=()=>deleteHabitFromDate(h, dateKey, ()=>{ rerenderSelf(); renderYears(); });
 
         right.append(badge,edit,del);
     } else {
@@ -2381,7 +2414,7 @@ function populateMobileTasks(dateKey, container){
     tasks.forEach(task => container.appendChild(makeMobileTaskRow(task)));
     const hint = document.createElement('div');
     hint.className = 'mobile-task-gesture-hint';
-    hint.textContent = 'Maintenir pour déplacer · ← flag / unflag · → supprimer';
+    hint.textContent = 'Maintenir : déplacer ou renommer · ← flag / unflag · → supprimer';
     container.appendChild(hint);
     const add = document.createElement('button');
     add.type = 'button';
@@ -2395,30 +2428,62 @@ function populateMobileTasks(dateKey, container){
 function syncMobileDayMode(){
     const tasksMode=mobileDayMode === 'tasks';
     dayPage.dataset.contentMode = mobileDayMode;
-    mobileHabitsMode?.setAttribute('aria-pressed', String(!tasksMode));
-    mobileTasksMode?.setAttribute('aria-pressed', String(tasksMode));
+    syncModeToggleVisual(document.getElementById('mobileDayModeToggle'), tasksMode ? 'tasks' : 'habits');
     syncPrimaryActionButton();
 }
 
-function bindModeToggleSwipe(toggle, onSwipeLeft, onSwipeRight){
+function syncModeToggleVisual(toggle, mode){
+    if(!toggle) return;
+    const selectedMode = mode === 'tasks' ? 'tasks' : 'habits';
+    toggle.dataset.selectedMode = selectedMode;
+    toggle.querySelectorAll('.mobile-mode-option').forEach(option => {
+        option.setAttribute('aria-pressed', String(option.dataset.mode === selectedMode));
+    });
+}
+
+function bindModeToggleSwipe(toggle, onModeChange, { commitDelay=0 } = {}){
     if(!toggle || toggle.dataset.swipeBound === 'true') return;
     toggle.dataset.swipeBound = 'true';
     let state = null;
     let suppressClickUntil = 0;
+    let commitTimer = null;
     const reset = () => {
         toggle.classList.remove('is-swipe-tracking');
-        toggle.style.removeProperty('--mode-swipe-shift');
-        delete toggle.dataset.swipeTarget;
+        toggle.style.removeProperty('--mode-position');
         state = null;
     };
+    const commitMode = mode => {
+        const nextMode = mode === 'tasks' ? 'tasks' : 'habits';
+        const previousMode = toggle.dataset.selectedMode === 'tasks' ? 'tasks' : 'habits';
+        syncModeToggleVisual(toggle, nextMode);
+        if(nextMode === previousMode) return;
+        clearTimeout(commitTimer);
+        if(commitDelay > 0) commitTimer = window.setTimeout(() => onModeChange?.(nextMode), commitDelay);
+        else onModeChange?.(nextMode);
+    };
     toggle.addEventListener('click', event => {
-        if(performance.now() >= suppressClickUntil) return;
-        event.preventDefault();
-        event.stopPropagation();
+        const option = event.target.closest('.mobile-mode-option');
+        if(!option || !toggle.contains(option)) return;
+        if(performance.now() < suppressClickUntil){
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+        }
+        commitMode(option.dataset.mode);
     }, true);
     toggle.addEventListener('pointerdown', event => {
         if(event.pointerType === 'mouse' && event.button !== 0) return;
-        state = { id:event.pointerId, startX:event.clientX, startY:event.clientY, swiping:false };
+        const startMode = toggle.dataset.selectedMode === 'tasks' ? 'tasks' : 'habits';
+        const tappedOption = event.target.closest?.('.mobile-mode-option');
+        state = {
+            id:event.pointerId,
+            startX:event.clientX,
+            startY:event.clientY,
+            startPosition:startMode === 'tasks' ? 1 : 0,
+            position:startMode === 'tasks' ? 1 : 0,
+            tapMode:tappedOption?.dataset.mode || null,
+            swiping:false
+        };
         try { toggle.setPointerCapture(event.pointerId); } catch(error){}
     });
     toggle.addEventListener('pointermove', event => {
@@ -2427,23 +2492,23 @@ function bindModeToggleSwipe(toggle, onSwipeLeft, onSwipeRight){
         const deltaY = event.clientY - state.startY;
         if(Math.abs(deltaX) < 8 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.15) return;
         state.swiping = true;
+        const segmentWidth = Math.max(1, (toggle.getBoundingClientRect().width - 6.4) / 2);
+        state.position = Math.max(0, Math.min(1, state.startPosition + deltaX / segmentWidth));
         toggle.classList.add('is-swipe-tracking');
-        toggle.dataset.swipeTarget = deltaX < 0 ? 'tasks' : 'habits';
-        toggle.style.setProperty('--mode-swipe-shift', `${Math.max(-7, Math.min(7, deltaX * .08))}px`);
+        toggle.style.setProperty('--mode-position', state.position.toFixed(4));
         event.preventDefault();
     });
     toggle.addEventListener('pointerup', event => {
         if(!state || state.id !== event.pointerId) return;
         const deltaX = event.clientX - state.startX;
         const deltaY = event.clientY - state.startY;
-        const shouldSwitch = state.swiping && Math.abs(deltaX) >= 34 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15;
-        if(shouldSwitch){
-            suppressClickUntil = performance.now() + 220;
-            navigator.vibrate?.(8);
-            if(deltaX < 0) onSwipeLeft?.();
-            else onSwipeRight?.();
-        }
+        const shouldCommitSwipe = state.swiping && Math.abs(deltaX) >= 18 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15;
+        const tappedMode = state.tapMode || (event.clientX < toggle.getBoundingClientRect().left + toggle.getBoundingClientRect().width / 2 ? 'habits' : 'tasks');
+        const targetMode = shouldCommitSwipe ? (state.position >= .5 ? 'tasks' : 'habits') : tappedMode;
+        suppressClickUntil = performance.now() + 220;
+        if(shouldCommitSwipe) navigator.vibrate?.(8);
         reset();
+        commitMode(targetMode);
     });
     toggle.addEventListener('pointercancel', reset);
 }
@@ -2461,12 +2526,9 @@ function syncPrimaryActionButton(){
     addHabitBtn.setAttribute('aria-label', 'Ajouter une habitude');
 }
 
-mobileHabitsMode?.addEventListener('click', ()=>setMobileDayMode('habits'));
-mobileTasksMode?.addEventListener('click', ()=>setMobileDayMode('tasks'));
 bindModeToggleSwipe(
     document.getElementById('mobileDayModeToggle'),
-    () => setMobileDayMode('tasks'),
-    () => setMobileDayMode('habits')
+    mode => setMobileDayMode(mode)
 );
 
 function applyMobileDayAppearance(dateKey){
