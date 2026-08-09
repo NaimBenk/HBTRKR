@@ -22,7 +22,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#080808">
   
-  <link rel="stylesheet" href="./dist/style.css?v=20260809-4">
+  <link rel="stylesheet" href="./dist/style.css?v=20260809-8">
 
   <style>
     :root{
@@ -30,11 +30,15 @@
       --gold:#FFD700;
       --gold-deep:#C9A227;
       --green:#31d874;
+      --green-deep:#1cab58;
       --green-soft:#68ef9c;
-      --task-later:#c88562;
-      --task-later-deep:#a5674c;
-      --task-later-border:#d5a085;
-      --task-later-ink:#23130c;
+      --orange:#e57f3a;
+      --orange-deep:#b9532c;
+      --orange-soft:#f0a261;
+      --task-later:var(--orange);
+      --task-later-deep:var(--orange-deep);
+      --task-later-border:var(--orange-soft);
+      --task-later-ink:#fff;
       --bg:#0b0c10;
       --panel:#111318;
       --panel-soft:rgba(255,255,255,.055);
@@ -210,7 +214,8 @@ button:focus-visible, input:focus-visible, a:focus-visible {
 }
 .app-header-inner { min-height: 3.25rem; }
 .app-logo { padding: .3rem .1rem; color: #fff; letter-spacing: .055em; transition: color .18s ease, opacity .18s ease; }
-.app-logo:hover { color: var(--green-soft); }
+.app-logo:active { color:var(--green-soft); }
+@media (hover:hover) and (pointer:fine) { .app-logo:hover { color:var(--green-soft); } }
 .app-button {
   display: inline-flex;
   align-items: center;
@@ -388,9 +393,9 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
   transition: background .15s ease, color .15s ease, border-color .15s ease, transform .1s ease;
 }
 .compact-task:hover { transform: translateY(-1px); border-color: rgba(255,255,255,.2); }
-.compact-task[data-status="done"] { background: rgba(49,216,116,.92); border-color: #68ef9c; color: #04150a; }
-.compact-task[data-status="later"] { background: linear-gradient(135deg, rgba(200,133,98,.92), rgba(165,103,76,.9)); border-color: var(--task-later-border); color: var(--task-later-ink); }
-.compact-task[data-status="skipped"] { background: rgba(240,82,82,.9); border-color: #ff8d8d; color: #210606; }
+.compact-task[data-status="done"] { background:linear-gradient(145deg,rgba(49,216,116,.9),rgba(28,171,88,.86)); border-color:var(--green-soft); color:#fff; }
+.compact-task[data-status="later"] { background:linear-gradient(135deg,var(--task-later),var(--task-later-deep)); border-color:var(--task-later-border); color:var(--task-later-ink); }
+.compact-task[data-status="skipped"] { background: rgba(240,82,82,.9); border-color: #ff8d8d; color: #fff; }
 .compact-add-task { width: 100%; margin-top: .32rem; padding: .28rem .4rem; border-radius: .45rem; color: rgba(255,255,255,.5); font-size: .6rem; text-align: left; }
 .compact-habit-list { display:grid; gap:.28rem; }
 .compact-habit-row {
@@ -433,9 +438,10 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
   text-align:left;
 }
 .compact-habit:hover { transform:translateY(-1px); border-color:rgba(255,255,255,.2); background:rgba(255,255,255,.09); }
-.compact-habit[data-status="done"] { color:#04150a; border-color:#68ef9c; background:rgba(49,216,116,.92); }
+.compact-habit[data-status="done"] { color:#fff; border-color:var(--green-soft); background:linear-gradient(145deg,rgba(49,216,116,.9),rgba(28,171,88,.86)); }
+.habit-toggle-button.habit-is-done { color:#fff; border-color:var(--green-soft); background:linear-gradient(145deg,rgba(49,216,116,.9),rgba(28,171,88,.86)); box-shadow:inset 0 1px rgba(255,255,255,.2),0 5px 16px rgba(49,216,116,.12); }
 .habit-toggle-button.is-best-streak {
-  color:#120f03 !important;
+  color:#fff !important;
   border-color:rgba(255,224,92,.72) !important;
   background:linear-gradient(135deg,#f7dc67 0%,var(--gold) 48%,var(--gold-deep) 100%) !important;
   box-shadow:inset 0 1px rgba(255,255,255,.38),0 5px 18px rgba(255,215,0,.2) !important;
@@ -499,15 +505,15 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 .mobile-mode-option:hover { color:rgba(255,255,255,.86); }
 .mobile-mode-option[aria-pressed="true"] { color:#edfff4; text-shadow:0 1px 8px rgba(5,40,20,.35); }
 .mobile-mode-option[aria-pressed="true"]:hover { color:#fff; }
-.mobile-task-button[data-status="done"] { color: #04150a; background: rgba(49,216,116,.92); border-color: #68ef9c; }
-.mobile-task-button[data-status="later"] { color: var(--task-later-ink); background: linear-gradient(135deg, rgba(200,133,98,.92), rgba(165,103,76,.9)); border-color: var(--task-later-border); }
-.mobile-task-button[data-status="skipped"] { color: #210606; background: rgba(240,82,82,.9); border-color: #ff8d8d; }
-.mobile-landscape-lock #appTitle { color: var(--gold); text-shadow: 0 0 14px rgba(255,215,0,.32); }
+.mobile-task-button[data-status="done"] { color:#fff; background:linear-gradient(145deg,rgba(49,216,116,.9),rgba(28,171,88,.86)); border-color:var(--green-soft); }
+.mobile-task-button[data-status="later"] { color:var(--task-later-ink); background:linear-gradient(135deg,var(--task-later),var(--task-later-deep)); border-color:var(--task-later-border); }
+.mobile-task-button[data-status="skipped"] { color: #fff; background: rgba(240,82,82,.9); border-color: #ff8d8d; }
+.mobile-landscape-lock #appTitle { color:#fff; text-shadow:none; }
 
 .compact-day[data-day-color="green"] { background: linear-gradient(145deg, rgba(49,216,116,.2), rgba(0,0,0,.24)); border-color: rgba(104,239,156,.36); }
 .compact-day[data-day-color="blue"] { background: linear-gradient(145deg, rgba(59,130,246,.22), rgba(0,0,0,.24)); border-color: rgba(96,165,250,.4); }
 .compact-day[data-day-color="purple"] { background: linear-gradient(145deg, rgba(168,85,247,.22), rgba(0,0,0,.24)); border-color: rgba(192,132,252,.4); }
-.compact-day[data-day-color="orange"] { background: linear-gradient(145deg, rgba(245,165,36,.22), rgba(0,0,0,.24)); border-color: rgba(251,191,36,.4); }
+.compact-day[data-day-color="orange"] { background:linear-gradient(145deg,rgba(229,127,58,.26),rgba(0,0,0,.24)); border-color:rgba(240,162,97,.44); }
 .compact-day[data-day-color="red"] { background: linear-gradient(145deg, rgba(240,82,82,.22), rgba(0,0,0,.24)); border-color: rgba(248,113,113,.4); }
 .compact-day[data-day-color="gray"] { background: linear-gradient(145deg, rgba(148,163,184,.18), rgba(0,0,0,.3)); border-color: rgba(148,163,184,.3); }
 .compact-day.is-past:not(.is-outside) { filter: saturate(.4) brightness(.68); opacity: .84; }
@@ -526,7 +532,7 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 .compact-day-color[data-day-color="green"], .mobile-day-color[data-day-color="green"] { color: #31d874; }
 .compact-day-color[data-day-color="blue"], .mobile-day-color[data-day-color="blue"] { color: #60a5fa; }
 .compact-day-color[data-day-color="purple"], .mobile-day-color[data-day-color="purple"] { color: #c084fc; }
-.compact-day-color[data-day-color="orange"], .mobile-day-color[data-day-color="orange"] { color: #fbbf24; }
+.compact-day-color[data-day-color="orange"], .mobile-day-color[data-day-color="orange"] { color:var(--orange); }
 .compact-day-color[data-day-color="red"], .mobile-day-color[data-day-color="red"] { color: #f87171; }
 .compact-day-color[data-day-color="gray"], .mobile-day-color[data-day-color="gray"] { color: #94a3b8; }
 .day-color-picker {
@@ -557,7 +563,7 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 .day-color-option[data-color="green"] { background: #31d874; }
 .day-color-option[data-color="blue"] { background: #60a5fa; }
 .day-color-option[data-color="purple"] { background: #c084fc; }
-.day-color-option[data-color="orange"] { background: #fbbf24; }
+.day-color-option[data-color="orange"] { background:var(--orange); }
 .day-color-option[data-color="red"] { background: #f87171; }
 .day-color-option[data-color="gray"] { background: #94a3b8; }
 .day-color-option:hover,
@@ -688,7 +694,7 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 #dayPage[data-day-color="green"] { --day-page-background: radial-gradient(circle at 50% 20%, rgba(49,216,116,.18), transparent 52%), var(--bg); }
 #dayPage[data-day-color="blue"] { --day-page-background: radial-gradient(circle at 50% 20%, rgba(59,130,246,.19), transparent 52%), var(--bg); }
 #dayPage[data-day-color="purple"] { --day-page-background: radial-gradient(circle at 50% 20%, rgba(168,85,247,.19), transparent 52%), var(--bg); }
-#dayPage[data-day-color="orange"] { --day-page-background: radial-gradient(circle at 50% 20%, rgba(249,115,22,.2), transparent 52%), var(--bg); }
+#dayPage[data-day-color="orange"] { --day-page-background:radial-gradient(circle at 50% 20%,rgba(229,127,58,.22),transparent 52%),var(--bg); }
 #dayPage[data-day-color="red"] { --day-page-background: radial-gradient(circle at 50% 20%, rgba(240,82,82,.19), transparent 52%), var(--bg); }
 #dayPage[data-day-color="gray"] { --day-page-background: radial-gradient(circle at 50% 20%, rgba(148,163,184,.14), transparent 52%), var(--bg); }
 #dayPage[data-day-color="default"] { --day-page-background: radial-gradient(circle at 50% 18%, rgba(96,165,250,.07), transparent 50%), radial-gradient(circle at 86% 72%, rgba(49,216,116,.035), transparent 44%), var(--bg); }
@@ -714,6 +720,7 @@ button:active:not(:disabled) { transform: scale(.97); }
   scroll-margin-top:4.75rem;
   animation:month-expand .34s cubic-bezier(.2,.8,.2,1) both;
 }
+.month-task-card.is-expanded.is-local-refresh { animation:none; }
 .month-task-card.is-expanded .compact-calendar-wrap { max-width:100%; padding-inline: 1rem; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.2) transparent; }
 .month-task-card.is-expanded .compact-calendar { min-width: 1080px; gap: .55rem; }
 .month-task-card.is-expanded .compact-day { min-height: 10rem; padding: .58rem; }
@@ -744,6 +751,7 @@ button:active:not(:disabled) { transform: scale(.97); }
 .task-name { min-width: 0; }
 #dayPage:not(.hidden) { animation: page-enter .28s cubic-bezier(.2,.8,.2,1) both; }
 #dayHabitsList > * { animation: task-enter .24s cubic-bezier(.2,.8,.2,1) both; }
+#dayHabitsList.is-sync-refresh > * { animation:none !important; }
 .day-cell:hover { transform: translateY(-1px); }
 .day-cell:active { transform: scale(.9); }
 .modal-card { animation: modal-enter .26s cubic-bezier(.2,.8,.2,1) both; }
@@ -822,7 +830,7 @@ button:active:not(:disabled) { transform: scale(.97); }
 .task-swipe-shell[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="left"]::before,
 .mobile-task-main[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="left"]::before { color:#fff; background: linear-gradient(270deg, rgba(239,68,68,.98), rgba(127,29,29,.8)); }
 .task-swipe-shell[data-swipe-direction="flag"][data-swipe-ready="true"]::before,
-.mobile-task-main[data-swipe-direction="flag"][data-swipe-ready="true"]::before { color:#fff; background:linear-gradient(270deg, rgba(200,133,98,.88), rgba(140,82,58,.74)); }
+.mobile-task-main[data-swipe-direction="flag"][data-swipe-ready="true"]::before { color:#fff; background:linear-gradient(270deg,rgba(229,127,58,.9),rgba(155,68,37,.8)); }
 .task-swipe-shell[data-swipe-ready="true"]::before,
 .mobile-task-main[data-swipe-ready="true"]::before,
 .habit-swipe-shell[data-swipe-ready="true"]::before,
@@ -1005,9 +1013,9 @@ button:active:not(:disabled) { transform: scale(.97); }
     <!-- Les contrôles du jour restent groupés et accessibles sans créer un second scroll. -->
     <div class="day-bottom-stack">
       <div class="mobile-day-mode">
-        <div id="mobileDayModeToggle" class="mobile-mode-toggle" role="group" aria-label="Contenu du jour" data-selected-mode="habits">
-          <button id="mobileHabitsMode" type="button" class="mobile-mode-option" data-mode="habits" aria-pressed="true">Habits</button>
-          <button id="mobileTasksMode" type="button" class="mobile-mode-option" data-mode="tasks" aria-pressed="false">Tasks</button>
+        <div id="mobileDayModeToggle" class="mobile-mode-toggle" role="group" aria-label="Contenu du jour" data-selected-mode="tasks">
+          <button id="mobileHabitsMode" type="button" class="mobile-mode-option" data-mode="habits" aria-pressed="false">Habits</button>
+          <button id="mobileTasksMode" type="button" class="mobile-mode-option" data-mode="tasks" aria-pressed="true">Tasks</button>
         </div>
       </div>
       <div class="day-bottom-nav flex items-center justify-center">
@@ -1015,7 +1023,7 @@ button:active:not(:disabled) { transform: scale(.97); }
           <button id="prevDay" aria-label="Jour précédent" class="h-11 w-11 sm:h-10 sm:w-10 grid place-items-center rounded-full hover:bg-white/10 active:scale-95 transition focus:outline-none focus:ring-2 focus:ring-white/20">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-          <button id="todayBtn" class="h-11 sm:h-10 px-4 sm:px-5 rounded-full font-semibold text-xs border active:scale-95 transition focus:outline-none focus:ring-2 focus:ring-green-300/50 flex items-center gap-2">
+          <button id="todayBtn" class="h-11 sm:h-10 px-4 sm:px-5 rounded-full font-semibold text-xs border active:scale-95 transition focus:outline-none focus:ring-2 focus:ring-[#31d874]/50 flex items-center gap-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity=".7"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
             <span>Aujourd'hui</span>
           </button>
@@ -1060,13 +1068,13 @@ button:active:not(:disabled) { transform: scale(.97); }
           </div>
 
 <div id="weeklyDaysRow" class="flex gap-1">
-  <button type="button" data-dow="1" aria-label="Lundi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">L</button>
-  <button type="button" data-dow="2" aria-label="Mardi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">M</button>
-  <button type="button" data-dow="3" aria-label="Mercredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">M</button>
-  <button type="button" data-dow="4" aria-label="Jeudi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">J</button>
-  <button type="button" data-dow="5" aria-label="Vendredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">V</button>
-  <button type="button" data-dow="6" aria-label="Samedi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">S</button>
-  <button type="button" data-dow="0" aria-label="Dimanche" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">D</button>
+  <button type="button" data-dow="1" aria-label="Lundi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-[#68ef9c]/40 bg-[#31d874] text-black">L</button>
+  <button type="button" data-dow="2" aria-label="Mardi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-[#68ef9c]/40 bg-[#31d874] text-black">M</button>
+  <button type="button" data-dow="3" aria-label="Mercredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-[#68ef9c]/40 bg-[#31d874] text-black">M</button>
+  <button type="button" data-dow="4" aria-label="Jeudi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-[#68ef9c]/40 bg-[#31d874] text-black">J</button>
+  <button type="button" data-dow="5" aria-label="Vendredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-[#68ef9c]/40 bg-[#31d874] text-black">V</button>
+  <button type="button" data-dow="6" aria-label="Samedi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-[#68ef9c]/40 bg-[#31d874] text-black">S</button>
+  <button type="button" data-dow="0" aria-label="Dimanche" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-[#68ef9c]/40 bg-[#31d874] text-black">D</button>
 </div>
 
 
@@ -1300,6 +1308,6 @@ button:active:not(:disabled) { transform: scale(.97); }
   <script src="./dist/html2canvas-pro.min.js?v=20260803-1" defer
           onload="document.documentElement.dataset.pngExporter='ready'"
           onerror="document.documentElement.dataset.pngExporter='error'"></script>
-  <script type="module" src="./app.js?v=20260809-4"></script>
+  <script type="module" src="./app.js?v=20260809-8"></script>
 </body>
 </html>

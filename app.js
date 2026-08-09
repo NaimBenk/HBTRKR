@@ -49,6 +49,20 @@ const DAY_COLOR_LABELS = Object.freeze({
 let activeDayColorPicker = null;
 let activeDayColorAnchor = null;
 
+const HBTRK_BACKUP_FORMAT = 'HBTRK_BACKUP';
+const HBTRK_BACKUP_VERSION = 2;
+const MAX_BACKUP_BYTES = 8 * 1024 * 1024;
+
+function isStrictDateKey(value){
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value || ''));
+    if(!match) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    return parsed.getUTCFullYear() === year && parsed.getUTCMonth() === month - 1 && parsed.getUTCDate() === day;
+}
+
 function normalizeTaskStatus(status){
     if(status === true || status === TASK_STATUS.DONE) return TASK_STATUS.DONE;
     if(status === TASK_STATUS.LATER) return TASK_STATUS.LATER;
@@ -68,17 +82,74 @@ function normalizeTaskRolloverSkips(rawSkips){
     const normalized = {};
     if(!rawSkips || typeof rawSkips !== 'object' || Array.isArray(rawSkips)) return normalized;
     Object.entries(rawSkips).forEach(([dateKey, rootIds]) => {
-        if(!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !Array.isArray(rootIds)) return;
+        if(!isStrictDateKey(dateKey) || !Array.isArray(rootIds)) return;
         const uniqueIds = [...new Set(rootIds.map(String).filter(Boolean))];
         if(uniqueIds.length) normalized[dateKey] = uniqueIds;
     });
     return normalized;
 }
 
+function normalizeHabitRecord(rawHabit){
+    if(!rawHabit || typeof rawHabit !== 'object') return null;
+    const name = String(rawHabit.name || '').trim().replace(/\s+/g, ' ');
+    const startDate = String(rawHabit.startDate || '');
+    if(!name || !isStrictDateKey(startDate)) return null;
+
+    let mode = rawHabit.mode;
+    if(!['weekly', 'interval', 'monthly'].includes(mode)){
+        if(rawHabit.frequency === 'daily') mode = 'weekly';
+        else if(rawHabit.frequency === 'weekly') mode = 'weekly';
+        else if(rawHabit.frequency === 'monthly') mode = 'monthly';
+        else return null;
+    }
+
+    const habit = { name, startDate, mode, daysOfWeek:null, everyXDays:null, dayOfMonth:null };
+    if(mode === 'weekly'){
+        const fallbackDays = rawHabit.frequency === 'daily' ? [0,1,2,3,4,5,6] : rawHabit.frequency === 'weekly' ? [1] : [];
+        const sourceDays = Array.isArray(rawHabit.daysOfWeek) ? rawHabit.daysOfWeek : fallbackDays;
+        habit.daysOfWeek = [...new Set(sourceDays.map(Number).filter(day => Number.isInteger(day) && day >= 0 && day <= 6))];
+        if(!habit.daysOfWeek.length) return null;
+    } else if(mode === 'interval'){
+        const everyXDays = Number(rawHabit.everyXDays);
+        if(!Number.isInteger(everyXDays) || everyXDays < 1) return null;
+        habit.everyXDays = everyXDays;
+    } else {
+        const dayOfMonth = Number(rawHabit.dayOfMonth ?? (rawHabit.frequency === 'monthly' ? 1 : NaN));
+        if(!Number.isInteger(dayOfMonth) || dayOfMonth < 1 || dayOfMonth > 31) return null;
+        habit.dayOfMonth = dayOfMonth;
+    }
+    if(isStrictDateKey(rawHabit.deletedAt)) habit.deletedAt = String(rawHabit.deletedAt);
+    if(Number.isFinite(Number(rawHabit.bestStreak)) && Number(rawHabit.bestStreak) > 0) habit.bestStreak = Math.floor(Number(rawHabit.bestStreak));
+    return habit;
+}
+
+function normalizeHabitCompletions(rawCompletions, habits){
+    const completions = {};
+    if(!rawCompletions || typeof rawCompletions !== 'object' || Array.isArray(rawCompletions)) return completions;
+    const canonicalNames = new Map(habits.map(habit => [normalizeHabitName(habit.name), habit.name]));
+    Object.entries(rawCompletions).forEach(([dateKey, dayValues]) => {
+        if(!isStrictDateKey(dateKey) || !dayValues || typeof dayValues !== 'object' || Array.isArray(dayValues)) return;
+        const normalizedDay = {};
+        Object.entries(dayValues).forEach(([rawName, status]) => {
+            const habitName = canonicalNames.get(normalizeHabitName(rawName));
+            if(habitName && (status === true || status === HABIT_STATUS.DONE)) normalizedDay[habitName] = HABIT_STATUS.DONE;
+        });
+        if(Object.keys(normalizedDay).length) completions[dateKey] = normalizedDay;
+    });
+    return completions;
+}
+
 function normalizeData(raw){
     const safe = raw && typeof raw === 'object' ? raw : {};
     const sourceHabits = Array.isArray(safe.habits) ? safe.habits.filter(Boolean) : [];
-    const recurringHabits = sourceHabits.filter(habit => habit.mode !== 'once');
+    const seenHabitNames = new Set();
+    const recurringHabits = sourceHabits.filter(habit => habit.mode !== 'once').map(normalizeHabitRecord).filter(habit => {
+        if(!habit) return false;
+        const nameKey = normalizeHabitName(habit.name);
+        if(seenHabitNames.has(nameKey)) return false;
+        seenHabitNames.add(nameKey);
+        return true;
+    });
     const storedTasks = Array.isArray(safe.tasks) ? safe.tasks.filter(Boolean) : [];
     const migratedOneOffTasks = sourceHabits
         .filter(habit => habit.mode === 'once' && habit.name && habit.startDate)
@@ -100,7 +171,7 @@ function normalizeData(raw){
         rolloverFromId: task.rolloverFromId ? String(task.rolloverFromId) : null,
         rolloverRootId: task.rolloverRootId ? String(task.rolloverRootId) : null
     })).filter(task => {
-        if((task.kind !== 'separator' && !task.name) || !/^\d{4}-\d{2}-\d{2}$/.test(task.date) || seenTasks.has(task.id)) return false;
+        if((task.kind !== 'separator' && !task.name) || !isStrictDateKey(task.date) || seenTasks.has(task.id)) return false;
         seenTasks.add(task.id);
         return true;
     });
@@ -197,18 +268,102 @@ function normalizeData(raw){
     const dayColors = {};
     if(safe.dayColors && typeof safe.dayColors === 'object' && !Array.isArray(safe.dayColors)){
         Object.entries(safe.dayColors).forEach(([dateKey, color]) => {
-            if(/^\d{4}-\d{2}-\d{2}$/.test(dateKey) && DAY_COLOR_CYCLE.includes(color) && color !== 'default') dayColors[dateKey] = color;
+            if(isStrictDateKey(dateKey) && DAY_COLOR_CYCLE.includes(color) && color !== 'default') dayColors[dateKey] = color;
         });
     }
+    const completions = normalizeHabitCompletions(safe.completions, recurringHabits);
     return {
-        ...safe,
         habits: recurringHabits,
         tasks: tasksWithSeparators,
         taskRolloverSkips,
         dayColors,
-        completions: safe.completions && typeof safe.completions === 'object' && !Array.isArray(safe.completions) ? safe.completions : {},
-        _rev: Number.isFinite(Number(safe._rev)) ? Number(safe._rev) : 0
+        completions,
+        _rev: Number.isFinite(Number(safe._rev)) ? Number(safe._rev) : 0,
+        ...(typeof safe._lastWriteId === 'string' ? { _lastWriteId:safe._lastWriteId } : {})
     };
+}
+
+function exportableData(source = data){
+    const normalized = normalizeData(source);
+    return {
+        habits: normalized.habits.map(habit => ({
+            name: habit.name,
+            startDate: habit.startDate,
+            mode: habit.mode,
+            daysOfWeek: habit.daysOfWeek ?? null,
+            everyXDays: habit.everyXDays ?? null,
+            dayOfMonth: habit.dayOfMonth ?? null,
+            ...(habit.deletedAt ? { deletedAt:habit.deletedAt } : {}),
+            ...(habit.bestStreak ? { bestStreak:habit.bestStreak } : {})
+        })),
+        tasks: normalized.tasks.map(task => ({
+            id: task.id,
+            name: task.name,
+            date: task.date,
+            kind: task.kind,
+            status: task.status,
+            important: task.important,
+            groupBreakBefore: false,
+            rolloverFromId: task.rolloverFromId ?? null,
+            rolloverRootId: task.rolloverRootId ?? null
+        })),
+        taskRolloverSkips: normalized.taskRolloverSkips,
+        dayColors: normalized.dayColors,
+        completions: normalized.completions
+    };
+}
+
+function createBackupPayload(){
+    return {
+        format: HBTRK_BACKUP_FORMAT,
+        version: HBTRK_BACKUP_VERSION,
+        app: 'HBTRK',
+        exportedAt: new Date().toISOString(),
+        data: exportableData(data)
+    };
+}
+
+function unwrapBackupPayload(payload){
+    if(!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('invalid-backup');
+    if(payload.format !== HBTRK_BACKUP_FORMAT) return payload;
+    if(!Number.isInteger(payload.version) || payload.version < 1 || payload.version > HBTRK_BACKUP_VERSION) throw new Error('unsupported-backup-version');
+    if(!payload.data || typeof payload.data !== 'object' || Array.isArray(payload.data)) throw new Error('invalid-backup-data');
+    return payload.data;
+}
+
+function validateBackupData(payload){
+    if(!payload || typeof payload !== 'object' || Array.isArray(payload)) return false;
+    if(!Array.isArray(payload.habits)) return false;
+    if(payload.tasks !== undefined && !Array.isArray(payload.tasks)) return false;
+    if(!payload.completions || typeof payload.completions !== 'object' || Array.isArray(payload.completions)) return false;
+    if(payload.taskRolloverSkips !== undefined && (!payload.taskRolloverSkips || typeof payload.taskRolloverSkips !== 'object' || Array.isArray(payload.taskRolloverSkips))) return false;
+    if(payload.dayColors !== undefined && (!payload.dayColors || typeof payload.dayColors !== 'object' || Array.isArray(payload.dayColors))) return false;
+    const habitsValid = payload.habits.every(habit => habit?.mode === 'once'
+        ? Boolean(String(habit.name || '').trim()) && isStrictDateKey(habit.startDate)
+        : Boolean(normalizeHabitRecord(habit)));
+    if(!habitsValid) return false;
+    const validTaskStatuses = new Set([undefined, false, true, TASK_STATUS.PENDING, TASK_STATUS.DONE, TASK_STATUS.LATER, TASK_STATUS.SKIPPED]);
+    const tasksValid = (payload.tasks || []).every(task => task && typeof task === 'object'
+        && isStrictDateKey(task.date || task.dateKey || task.startDate)
+        && (task.kind === 'separator' || Boolean(String(task.name || '').trim()))
+        && validTaskStatuses.has(task.status));
+    if(!tasksValid) return false;
+    const completionsValid = Object.entries(payload.completions).every(([dateKey, values]) => isStrictDateKey(dateKey)
+        && values && typeof values === 'object' && !Array.isArray(values)
+        && Object.values(values).every(status => [false, true, TASK_STATUS.PENDING, TASK_STATUS.DONE, TASK_STATUS.LATER, TASK_STATUS.SKIPPED].includes(status)));
+    if(!completionsValid) return false;
+    const skipsValid = Object.entries(payload.taskRolloverSkips || {}).every(([dateKey, ids]) => isStrictDateKey(dateKey) && Array.isArray(ids) && ids.every(id => typeof id === 'string' || typeof id === 'number'));
+    if(!skipsValid) return false;
+    const colorsValid = Object.entries(payload.dayColors || {}).every(([dateKey, color]) => isStrictDateKey(dateKey) && DAY_COLOR_CYCLE.includes(color));
+    if(!colorsValid) return false;
+    return true;
+}
+
+function backupSummary(source){
+    const tasks = source.tasks.filter(task => task.kind !== 'separator').length;
+    const separators = source.tasks.length - tasks;
+    const completedHabits = Object.values(source.completions).reduce((total, day) => total + Object.keys(day).length, 0);
+    return `${source.habits.length} habitude${source.habits.length !== 1 ? 's' : ''}, ${tasks} tâche${tasks !== 1 ? 's' : ''}, ${separators} séparation${separators !== 1 ? 's' : ''} et ${completedHabits} validation${completedHabits !== 1 ? 's' : ''}`;
 }
 
 function getHabitStatus(dateKey, habitName){
@@ -353,63 +508,33 @@ fileInput.addEventListener('change', async (e) => {
     if (!file) return;
 
     try {
-    // 1. Lire le contenu du fichier
-    const text = await file.text();
+    if(file.size > MAX_BACKUP_BYTES) throw new Error('backup-too-large');
+    const imported = unwrapBackupPayload(JSON.parse(await file.text()));
+    if(!validateBackupData(imported)) throw new Error('invalid-backup');
 
-    // 2. Parser le JSON
-    const imported = JSON.parse(text);
-
-    // 3. Valider structure minimale
-    if (
-        !imported ||
-        !Array.isArray(imported.habits) ||
-        typeof imported.completions !== 'object'
-    ) {
-        showToast("Fichier invalide : export HBTRK attendu.", 'error');
-        fileInput.value = '';
-        return;
-    }
-
-    // 4. Injecter dans l'app
-    data = normalizeData(imported);
+    const previousRevision = Number.isFinite(Number(data._rev)) ? Number(data._rev) : 0;
+    const normalized = normalizeData(imported);
+    if(imported.habits.length && !normalized.habits.length) throw new Error('invalid-habits');
+    if(imported.tasks?.length && !normalized.tasks.length) throw new Error('invalid-tasks');
+    normalized._rev = previousRevision;
+    delete normalized._lastWriteId;
+    data = normalized;
     rollForwardLaterTasks();
-
     clearAllCaches();
-
-    // 5. Forcer un rerender immédiat en local
-    renderYears();
-
-    // Si on a déjà une date affichée en vue day, on la rerend aussi
-    if (focusedDateKey) {
-        if (!dayPage.classList.contains('hidden')) {
-        showDayPage(focusedDateKey);
-        } else if (!isSmall()) {
-        // panneau latéral (desktop)
-        populateHabits(focusedDateKey, habitsList, false);
-        updateDayCell(focusedDateKey);
-        } else {
-        // vue day (mobile)
-        showDayPage(focusedDateKey);
-        }
-    }
-
-    // 6. Essayer de pousser sur Firestore si on est connecté et qu'on a docRef
-    try {
-        if (docRef) {
-        data._rev = (data._rev || 0) + 1;
-        await setDoc(docRef, data);
-        }
-    } catch (errFirestore) {
-        console.warn("Import local OK mais sync Firestore impossible (probablement pas connecté) :", errFirestore);
-    }
-
-    showToast('Importation réussie.');
+    closeDayColorPicker();
+    renderVisibleDataAfterFullChange();
+    persistDebounced(0);
+    showToast(`Importation réussie · ${backupSummary(data)}.`);
 
     } catch (err) {
     console.error("Erreur d'import JSON :", err);
-    showToast("Impossible de lire ce fichier. Vérifie qu’il s’agit bien d’un export HBTRK.", 'error');
+    const message = err?.message === 'backup-too-large'
+        ? 'Ce fichier dépasse la taille maximale de 8 Mo.'
+        : err?.message === 'unsupported-backup-version'
+            ? 'Cette sauvegarde provient d’une version plus récente de HBTRK.'
+            : 'Impossible de lire ce fichier. Vérifie qu’il s’agit bien d’un export HBTRK.';
+    showToast(message, 'error');
     } finally {
-    // 7. Reset de l'input pour pouvoir réimporter le même fichier sans recharger la page
     fileInput.value = '';
     }
 });
@@ -439,10 +564,12 @@ let focusedDateKey = null;
 const now = new Date(); const currentYear = now.getFullYear(); const currentMonth = now.getMonth();
 let mobileLandscapeLocked = false;
 let landscapeFullscreenOwned = false;
-let mobileDayMode = localStorage.getItem('hbtrk-mobile-day-mode') === 'tasks' ? 'tasks' : 'habits';
+let mobileDayMode = 'tasks';
 let expandedMonthKey = null;
-let expandedMonthMode = 'habits';
+let expandedMonthMode = 'tasks';
 let expandedMonthFocusDateKey = null;
+let homeRenderDirty = false;
+let dayCellRefreshToken = 0;
 let minYear = 2025; let maxYear = currentYear + 5;
 const viewportIsSmall = () => window.matchMedia('(max-width: 639px)').matches;
 const isSmall = () => mobileLandscapeLocked || viewportIsSmall();
@@ -663,7 +790,8 @@ menuImport.onclick = () => {
 };
 
 menuExport.onclick = () => {
-    const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+    const backup = createBackupPayload();
+    const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
     const url=URL.createObjectURL(blob);
     const a=document.createElement('a');
     a.href=url;
@@ -672,7 +800,7 @@ menuExport.onclick = () => {
     a.click();
     a.remove();
     window.setTimeout(()=>URL.revokeObjectURL(url), 1000);
-    showToast('Sauvegarde HBTRK exportée.');
+    showToast(`Sauvegarde exportée · ${backupSummary(backup.data)}.`);
     closeNavPanel();
 };
 
@@ -749,11 +877,13 @@ function expandedMonthCard(year, month){
     return document.querySelector(`.month-task-card[data-year="${year}"][data-month="${month}"]`);
 }
 
-function refreshHomeMonthCard(year, month){
+function refreshHomeMonthCard(year, month, { animate = true } = {}){
     const current = expandedMonthCard(year, month);
     if(!current) return null;
     const replacement = makeHomeMonthCard(year, month);
+    if(!animate) replacement.classList.add('is-local-refresh');
     current.replaceWith(replacement);
+    if(!animate) requestAnimationFrame(() => replacement.classList.remove('is-local-refresh'));
     return replacement;
 }
 
@@ -773,7 +903,7 @@ function scrollExpandedMonthIntoView(year, month, dateKey = null){
     }));
 }
 
-function openExpandedMonth(year, month, mode = 'habits', dateKey = null){
+function openExpandedMonth(year, month, mode = 'tasks', dateKey = null){
     const previousMonthKey = expandedMonthKey;
     expandedMonthKey = `${year}-${month}`;
     expandedMonthMode = mode === 'tasks' ? 'tasks' : 'habits';
@@ -869,7 +999,7 @@ function makeHomeMonthCard(y, m){
         expand.setAttribute('aria-label', `Développer ${monthNameLong(m)} ${y}`);
         expand.title='Développer le mois';
         expand.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-        expand.onclick=()=>openExpandedMonth(y,m,'habits');
+        expand.onclick=()=>openExpandedMonth(y,m,'tasks');
         titleRow.append(mtitle, expand);
     }
     month.appendChild(titleRow);
@@ -907,7 +1037,7 @@ function makeHomeMonthCard(y, m){
                 btn.classList.add('ring-2','ring-white/10');
                 btn.setAttribute('aria-current', 'date');
             }
-            btn.onclick=()=>openExpandedMonth(y,m,'habits',dk);
+            btn.onclick=()=>openExpandedMonth(y,m,'tasks',dk);
             days.appendChild(btn);
         }
         month.appendChild(days);
@@ -915,8 +1045,8 @@ function makeHomeMonthCard(y, m){
     return month;
 }
 
-function ensureYearRendered(y){
-    if(document.getElementById('year-'+y)) return;
+function ensureYearRendered(y, parent = yearsContainer){
+    if(document.getElementById('year-'+y) || parent.querySelector?.(`#year-${y}`)) return;
     const el = document.createElement('section');
     el.id='year-'+y;
     el.className='year-block rounded-full p-4';
@@ -935,7 +1065,7 @@ function ensureYearRendered(y){
     grid.className='grid month-grid gap-4';
     for(let m=0;m<12;m++) grid.appendChild(makeHomeMonthCard(y,m));
     el.appendChild(grid);
-    yearsContainer.appendChild(el);
+    parent.appendChild(el);
 }
 
 function tasksForDate(dateKey){
@@ -1014,13 +1144,13 @@ function applyExpandedDayAppearance(element, dateKey, mode = null){
     element.classList.toggle('is-past', resolvedMode === 'tasks' && isPastDateKey(dateKey));
 }
 
-async function setDayColor(dateKey, color){
+function setDayColor(dateKey, color){
     const nextColor = DAY_COLOR_CYCLE.includes(color) ? color : 'default';
     if(nextColor === 'default') delete data.dayColors[dateKey];
     else data.dayColors[dateKey] = nextColor;
     document.querySelectorAll(`.compact-day[data-date-key="${dateKey}"]`).forEach(day => applyExpandedDayAppearance(day, dateKey));
     if(focusedDateKey === dateKey) applyMobileDayAppearance(dateKey);
-    await persistDebounced();
+    persistDebounced();
 }
 
 function closeDayColorPicker(){
@@ -1051,9 +1181,9 @@ function openDayColorPicker(anchor, dateKey, onApplied){
         option.setAttribute('aria-label', DAY_COLOR_LABELS[color]);
         option.setAttribute('aria-checked', String(color === currentColor));
         option.setAttribute('role', 'menuitemradio');
-        option.onclick = async event => {
+        option.onclick = event => {
             event.stopPropagation();
-            await setDayColor(dateKey, color);
+            setDayColor(dateKey, color);
             anchor.dataset.dayColor = dayColorFor(dateKey);
             onApplied?.();
             closeDayColorPicker();
@@ -1130,7 +1260,7 @@ async function moveTaskWithinDay(task, direction){
     const targetIndex = index + direction;
     if(index < 0 || targetIndex < 0 || targetIndex >= siblings.length) return;
     moveTaskToDayIndex(task, targetIndex);
-    rerenderTaskViews(task.date);
+    reorderRenderedTaskRows(task.date);
     persistDebounced();
 }
 
@@ -1138,7 +1268,8 @@ async function setTaskImportant(task, important){
     if(task.kind === 'separator') return;
     task.important = important;
     if(important) moveTaskToDayIndex(task, 0);
-    rerenderTaskViews(task.date);
+    syncRenderedTaskState(task);
+    reorderRenderedTaskRows(task.date);
     persistDebounced();
 }
 
@@ -1216,7 +1347,7 @@ async function renameTask(task){
         return false;
     }
     task.name = nextName;
-    rerenderTaskViews(task.date);
+    syncRenderedTaskState(task);
     persistDebounced(0);
     showToast('Tâche renommée.');
     return true;
@@ -1257,6 +1388,61 @@ function setTaskButtonContent(button, task){
     button.appendChild(name);
 }
 
+function renderedTaskRows(taskId){
+    return Array.from(document.querySelectorAll('[data-task-id]')).filter(row => row.dataset.taskId === taskId);
+}
+
+function syncRenderedTaskState(task){
+    renderedTaskRows(task.id).forEach(row => {
+        row.classList.toggle('is-important', task.important);
+        const button = row.querySelector('.mobile-task-button, .compact-task');
+        if(!button) return;
+        button.classList.toggle('is-important', task.important);
+        setTaskButtonContent(button, task);
+        button.dataset.status = normalizeTaskStatus(task.status);
+        button.setAttribute('aria-pressed', String(task.status === TASK_STATUS.DONE));
+        const compact = button.classList.contains('compact-task');
+        button.title = compact ? `${task.name} — ${taskStatusLabel[task.status]}. Cliquer pour changer.` : '';
+        button.setAttribute('aria-label', compact
+            ? `${task.name}, ${taskStatusLabel[task.status]}. Cliquer pour passer au statut suivant.`
+            : `${task.name}, ${taskStatusLabel[task.status]}. Appuyer pour changer. Maintenir pour déplacer.`);
+    });
+}
+
+function reorderRowsInContainer(container, rowSelector, dateKey, beforeSelector = null){
+    if(!container) return;
+    const rows = new Map(Array.from(container.querySelectorAll(rowSelector)).map(row => [row.dataset.taskId, row]));
+    const anchor = beforeSelector ? container.querySelector(beforeSelector) : null;
+    tasksForDate(dateKey).forEach(task => {
+        const row = rows.get(task.id);
+        if(row) container.insertBefore(row, anchor);
+    });
+}
+
+function reorderRenderedTaskRows(dateKey){
+    if(!dayPage.classList.contains('hidden') && mobileDayMode === 'tasks' && focusedDateKey === dateKey){
+        reorderRowsInContainer(dayHabitsList, '.mobile-task-row', dateKey, '.mobile-task-gesture-hint, .mobile-add-task-button');
+    }
+    const date = parseDateKey(dateKey);
+    const card = expandedMonthCard(date.getFullYear(), date.getMonth());
+    const day = card?.querySelector(`.compact-day[data-date-key="${dateKey}"]`);
+    reorderRowsInContainer(day?.querySelector('.compact-task-list'), '.compact-task-row', dateKey);
+}
+
+function syncMobileTaskEmptyState(dateKey){
+    if(dayPage.classList.contains('hidden') || mobileDayMode !== 'tasks' || focusedDateKey !== dateKey) return;
+    const currentEmpty = dayHabitsList.querySelector('.mobile-task-empty');
+    if(tasksForDate(dateKey).length){
+        currentEmpty?.remove();
+        return;
+    }
+    if(currentEmpty) return;
+    const empty = document.createElement('div');
+    empty.className = 'text-sm text-white/60 mobile-task-empty';
+    empty.textContent = 'Aucune tâche prévue.';
+    dayHabitsList.insertBefore(empty, dayHabitsList.querySelector('.mobile-task-gesture-hint, .mobile-add-task-button'));
+}
+
 function suppressTaskClick(row){
     row.dataset.suppressClick = 'true';
 }
@@ -1269,7 +1455,9 @@ async function deleteTaskDirect(task){
     const taskDate = task.date;
     rememberTaskRolloverSkip(task);
     data.tasks = data.tasks.filter(candidate => candidate.id !== task.id);
-    rerenderTaskViews(taskDate);
+    renderedTaskRows(task.id).forEach(row => row.remove());
+    syncMobileTaskEmptyState(taskDate);
+    refreshCompactProgress(taskDate);
     persistDebounced();
     showToast(task.kind === 'separator' ? 'Séparation supprimée.' : 'Tâche supprimée.');
 }
@@ -1287,6 +1475,7 @@ function reorderRowAtPointer(row, container, rowSelector, clientY){
 function persistRenderedTaskOrder(container, rowSelector, dateKey){
     const orderedIds = Array.from(container.querySelectorAll(rowSelector)).map(row => row.dataset.taskId).filter(Boolean);
     applyDayTaskOrder(dateKey, orderedIds);
+    reorderRenderedTaskRows(dateKey);
     persistDebounced(0);
 }
 
@@ -1596,7 +1785,6 @@ async function addCompactTask(dateKey){
 function rerenderTaskViews(dateKey, { month = false } = {}){
     if(!dayPage.classList.contains('hidden') && mobileDayMode === 'tasks'){
         if((focusedDateKey || dateKey) === dateKey) populateMobileTasks(dateKey, dayHabitsList);
-        return;
     }
     const date = parseDateKey(dateKey);
     const year = date.getFullYear();
@@ -1674,20 +1862,23 @@ function makeCompactTaskDay(date){
     return day;
 }
 
-function refreshExpandedHabitDay(dateKey){
+function refreshExpandedHabitMetrics(dateKey){
     if(expandedMonthMode !== 'habits') return;
-    const current = document.querySelector(`.compact-day[data-date-key="${dateKey}"]`);
-    if(current) current.replaceWith(makeCompactHabitDay(parseDateKey(dateKey)));
     const date = parseDateKey(dateKey);
     const card = expandedMonthCard(date.getFullYear(), date.getMonth());
+    const current = card?.querySelector(`.compact-day[data-date-key="${dateKey}"]`);
+    if(current){
+        const rate = current.querySelector('.compact-day-rate');
+        if(rate) rate.textContent = `${Math.round(getCompletionRate(dateKey) * 100)}%`;
+        applyExpandedDayAppearance(current, dateKey, 'habits');
+    }
     const meta = card?.querySelector('.compact-month-meta');
     if(meta) meta.textContent = expandedMonthMeta(date.getFullYear(), date.getMonth(), 'habits');
 }
 
 function makeCompactHabitRow(habit, dateKey){
     const date = parseDateKey(dateKey);
-    const refreshMonth = () => refreshHomeMonthCard(date.getFullYear(), date.getMonth());
-    const refreshAllMonths = () => renderYears();
+    const refreshMonth = () => refreshHomeMonthCard(date.getFullYear(), date.getMonth(), { animate:false });
     const row = document.createElement('div');
     row.className = 'compact-habit-row';
     row.dataset.habitRow = '';
@@ -1697,7 +1888,7 @@ function makeCompactHabitRow(habit, dateKey){
     const button = makeHabitToggleButton(
         habit,
         dateKey,
-        () => refreshExpandedHabitDay(dateKey),
+        null,
         { isCompactMonth:true }
     );
     bindHabitPointerGestures({
@@ -1711,7 +1902,7 @@ function makeCompactHabitRow(habit, dateKey){
         enableDrag:true,
         enableSwipe:true,
         onEdited:refreshMonth,
-        onDeleted:refreshAllMonths,
+        onDeleted:()=>refreshHomeAfterHabitDefinitionChange(dateKey),
         onReordered:refreshMonth
     });
     swipeShell.appendChild(button);
@@ -1783,7 +1974,7 @@ function applyDayCellStyle(btn, dk){
     const rate=getCompletionRate(dk);
     btn.classList.remove('gold');
     btn.style.background='';
-    btn.style.backgroundColor=`rgba(0,255,100,${rate})`;
+    btn.style.backgroundColor=`rgba(49,216,116,${rate})`;
     btn.style.color = rate>0 ? '#0a0a0a' : '';
     }
 }
@@ -1791,10 +1982,64 @@ function applyDayCellStyle(btn, dk){
 function updateDayCell(dk){ const el = document.querySelector(`button.day-cell[data-date-key="${dk}"]`); if(el) applyDayCellStyle(el, dk); }
 
 function renderYears(){
+    homeRenderDirty = false;
+    dayCellRefreshToken++;
     syncPrimaryActionButton();
     yearsContainer.innerHTML='';
     yearsContainer.classList.add('space-y-10');
-    for(let y=minYear;y<=maxYear;y++) ensureYearRendered(y);
+    const fragment = document.createDocumentFragment();
+    for(let y=minYear;y<=maxYear;y++) ensureYearRendered(y, fragment);
+    yearsContainer.appendChild(fragment);
+}
+
+function markHomeRenderDirty(){
+    homeRenderDirty = true;
+}
+
+function refreshRenderedDayCells(fromDateKey = null){
+    const token = ++dayCellRefreshToken;
+    const cells = Array.from(document.querySelectorAll('button.day-cell[data-date-key]'))
+        .filter(cell => !fromDateKey || cell.dataset.dateKey >= fromDateKey);
+    let index = 0;
+    const renderBatch = () => {
+        if(token !== dayCellRefreshToken || homePage.classList.contains('hidden')) return;
+        const limit = Math.min(cells.length, index + 140);
+        while(index < limit){
+            const cell = cells[index++];
+            applyDayCellStyle(cell, cell.dataset.dateKey);
+        }
+        if(index < cells.length) requestAnimationFrame(renderBatch);
+    };
+    requestAnimationFrame(renderBatch);
+}
+
+function refreshExpandedHomeMonth(){
+    if(!expandedMonthKey) return;
+    const [year, month] = expandedMonthKey.split('-').map(Number);
+    refreshHomeMonthCard(year, month, { animate:false });
+}
+
+function refreshHomeAfterHabitDefinitionChange(fromDateKey = null){
+    if(homePage.classList.contains('hidden')){
+        markHomeRenderDirty();
+        return;
+    }
+    refreshExpandedHomeMonth();
+    refreshRenderedDayCells(fromDateKey);
+}
+
+function renderVisibleDataAfterFullChange({ remote = false } = {}){
+    if(!dayPage.classList.contains('hidden') && focusedDateKey){
+        markHomeRenderDirty();
+        showDayPage(focusedDateKey);
+        if(remote){
+            dayHabitsList.classList.add('is-sync-refresh');
+            requestAnimationFrame(() => dayHabitsList.classList.remove('is-sync-refresh'));
+        }
+        return;
+    }
+    renderYears();
+    if(focusedDateKey && dayIsOpen) populateHabits(focusedDateKey, habitsList, false);
 }
 
 const focusCurrentMonth = ()=>{
@@ -1897,28 +2142,71 @@ const clamp3 = (n)=>{ const s = String(Math.max(0, n|0)); return s.length>3 ? s.
 const makeStreakBadge=(cur,best,isBestNow)=>{ const span=document.createElement('span'); span.className='streak-badge'+(isBestNow && cur>0 ? ' streak-badge--best':'' ); span.textContent=`${clamp3(cur)}/${clamp3(best)}`; span.title='Série actuelle / meilleur record'; return span; };
 
 let persistTimer = null;
+let persistIdleHandle = null;
 let persistResolvers = [];
-let lastLocalWriteRevision = -1;
-let lastLocalWriteId = '';
+let persistWriteInFlight = false;
+let persistWriteQueued = false;
+
+function cancelScheduledPersistence(){
+    clearTimeout(persistTimer);
+    persistTimer = null;
+    if(persistIdleHandle !== null && typeof cancelIdleCallback === 'function') cancelIdleCallback(persistIdleHandle);
+    persistIdleHandle = null;
+}
+
+function schedulePersistenceFlush(delay){
+    cancelScheduledPersistence();
+    persistTimer = window.setTimeout(() => {
+        persistTimer = null;
+        if(typeof requestIdleCallback === 'function'){
+            persistIdleHandle = requestIdleCallback(() => {
+                persistIdleHandle = null;
+                flushPersistence();
+            }, { timeout:220 });
+        } else {
+            persistTimer = window.setTimeout(() => {
+                persistTimer = null;
+                flushPersistence();
+            }, 0);
+        }
+    }, Math.max(0, delay));
+}
+
+function resetScheduledPersistence(){
+    cancelScheduledPersistence();
+    persistWriteQueued = false;
+    const cancelledResolvers = persistResolvers.splice(0);
+    cancelledResolvers.forEach(done => done());
+}
+
+async function flushPersistence(){
+    if(persistWriteInFlight){
+        persistWriteQueued = true;
+        return;
+    }
+    if(!persistResolvers.length) return;
+    persistWriteInFlight = true;
+    const batchResolvers = persistResolvers.splice(0);
+    try {
+        data._rev = (data._rev || 0) + 1;
+        data._lastWriteId = `${clientSyncId}:${Date.now()}:${++localWriteSequence}`;
+        if(docRef) await setDoc(docRef, data);
+    } catch(error){
+        console.error('persist error', error);
+        showToast('Synchronisation impossible. Les changements seront retentés à la prochaine action.', 'error');
+    } finally {
+        batchResolvers.forEach(done => done());
+        persistWriteInFlight = false;
+        if(persistWriteQueued || persistResolvers.length){
+            persistWriteQueued = false;
+            schedulePersistenceFlush(0);
+        }
+    }
+}
+
 const persistDebounced = (delay = 120) => new Promise(resolve => {
     persistResolvers.push(resolve);
-    clearTimeout(persistTimer);
-    persistTimer = setTimeout(async () => {
-        try {
-            data._rev = (data._rev || 0) + 1;
-            lastLocalWriteRevision = data._rev;
-            lastLocalWriteId = `${clientSyncId}:${Date.now()}:${++localWriteSequence}`;
-            data._lastWriteId = lastLocalWriteId;
-            if(docRef) await setDoc(docRef, data);
-        } catch(error){
-            console.error('persist error', error);
-            showToast('Synchronisation impossible. Les changements seront retentés à la prochaine action.', 'error');
-        } finally {
-            const pendingResolvers = persistResolvers;
-            persistResolvers = [];
-            pendingResolvers.forEach(done => done());
-        }
-    }, delay);
+    schedulePersistenceFlush(delay);
 });
 
 let taskRolloverTimer = null;
@@ -1928,6 +2216,7 @@ async function processTaskRollovers(){
     if(!created) return 0;
     if(focusedDateKey && !dayPage.classList.contains('hidden') && mobileDayMode === 'tasks'){
         populateMobileTasks(focusedDateKey, dayHabitsList);
+        markHomeRenderDirty();
     } else if(expandedMonthKey && expandedMonthMode === 'tasks'){
         const [year, month] = expandedMonthKey.split('-').map(Number);
         rerenderTaskViews(formatDateKey(new Date(year, month, 1)), { month:true });
@@ -1950,47 +2239,75 @@ document.addEventListener('visibilitychange', () => {
     if(document.visibilityState === 'visible') processTaskRollovers();
 });
 
-function makeHabitToggleButton(h, dateKey, onChanged, opts = {}) {
-    const { isDayView = false, isCompactMonth = false } = opts;
+function syncHabitToggleButtonState(btn, h, dateKey, opts = {}){
+    const { isCompactMonth = false } = opts;
     const done = isHabitDone(dateKey, h.name);
     const currentStreak = computeStreakForHabit(h.name, dateKey);
     const bestStreak = Math.max(h.bestStreak || 0, computeBestStreakCached(h.name));
     const isBestStreak = currentStreak > 0 && currentStreak >= bestStreak;
+    btn.dataset.status = done ? HABIT_STATUS.DONE : HABIT_STATUS.PENDING;
+    btn.setAttribute('aria-pressed', done ? 'true' : 'false');
+    btn.classList.toggle('is-best-streak', isBestStreak);
+    btn.dataset.bestStreak = String(isBestStreak);
+    btn.setAttribute('aria-label', `${h.name}, ${done ? 'faite' : 'à faire'}${isBestStreak ? ', meilleure série en cours' : ''}. Appuyer pour ${done ? 'décocher' : 'cocher'}.`);
+    if(isCompactMonth){
+        const streak = btn.querySelector('.compact-habit-streak');
+        if(streak) streak.textContent = `${clamp3(currentStreak)}/${clamp3(bestStreak)}`;
+        return;
+    }
+    const doneClasses = ['habit-is-done','text-white'];
+    const pendingClasses = ['bg-white/5','border-white/10','hover:bg-white/10','text-white'];
+    btn.classList.remove(...doneClasses, ...pendingClasses);
+    btn.classList.add(...(done ? doneClasses : pendingClasses));
+}
+
+function syncRenderedHabitState(h, dateKey){
+    document.querySelectorAll('.habit-toggle-button').forEach(button => {
+        if(button.dataset.habitName !== h.name || button.dataset.dateKey !== dateKey) return;
+        syncHabitToggleButtonState(button, h, dateKey, {
+            isCompactMonth:button.classList.contains('compact-habit'),
+            isDayView:button.classList.contains('habit-day-button')
+        });
+    });
+}
+
+function makeHabitToggleButton(h, dateKey, onChanged, opts = {}) {
+    const { isDayView = false, isCompactMonth = false } = opts;
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.setAttribute('aria-pressed', done ? 'true' : 'false');
+    btn.dataset.habitName = h.name;
+    btn.dataset.dateKey = dateKey;
     if(isCompactMonth){
         btn.className = 'compact-habit';
-        btn.dataset.status = done ? HABIT_STATUS.DONE : HABIT_STATUS.PENDING;
         const name = document.createElement('span');
         name.className = 'compact-habit-name';
         name.textContent = h.name;
         const streak = document.createElement('span');
         streak.className = 'compact-habit-streak';
-        streak.textContent = `${clamp3(currentStreak)}/${clamp3(bestStreak)}`;
         streak.title = 'Série actuelle / meilleur record';
         btn.append(name, streak);
     } else {
         const width = isDayView ? ['w-4/5'] : ['w-auto'];
         const textSize = isDayView ? 'text-xl' : 'text-xs';
-        btn.className = [ ...width,'px-4','py-3','rounded-full','border','transition', textSize,'font-semibold', done ? 'bg-[#31d874] border-green-400/40 ring-1 ring-green-300/30 text-black' : 'bg-white/5 border-white/10 hover:bg-white/10 text-white' ].join(' ');
+        btn.className = [ ...width,'px-4','py-3','rounded-full','border','transition', textSize,'font-semibold' ].join(' ');
         if(isDayView) btn.classList.add('habit-day-button');
         btn.textContent = h.name;
     }
     btn.classList.add('habit-toggle-button');
-    btn.classList.toggle('is-best-streak', isBestStreak);
-    btn.dataset.bestStreak = String(isBestStreak);
-    btn.setAttribute('aria-label', `${h.name}, ${done ? 'faite' : 'à faire'}${isBestStreak ? ', meilleure série en cours' : ''}. Appuyer pour ${done ? 'décocher' : 'cocher'}.`);
-    btn.onclick = async () => {
+    syncHabitToggleButtonState(btn, h, dateKey, opts);
+    btn.onclick = () => {
     const row = btn.closest('[data-habit-row]');
     if(row?.dataset.suppressClick === 'true') return;
+    const done = isHabitDone(dateKey, h.name);
     setHabitStatus(dateKey, h.name, done ? HABIT_STATUS.PENDING : HABIT_STATUS.DONE);
     const d = parseDateKey(dateKey);
     clearMonthCacheForHabit(h.name, d.getFullYear(), d.getMonth());
     clearHabitCaches(h.name);
+    syncRenderedHabitState(h, dateKey);
+    refreshExpandedHabitMetrics(dateKey);
     if (typeof onChanged === 'function') onChanged();
     updateDayCell(dateKey);
-    await persistDebounced();
+    persistDebounced();
     };
     return btn;
 }
@@ -2261,7 +2578,7 @@ function enableDragSort(container){
 }
 
 function populateHabits(dateKey, container, minimal=false){
-    container.innerHTML=''; const actives=data.habits.filter(h=>isHabitActiveOn(h,dateKey)); if(actives.length===0){ container.innerHTML='<div class="text-sm text-white/60">Aucune habitude active.</div>'; return; }
+    container.innerHTML=''; const actives=data.habits.filter(h=>isHabitActiveOn(h,dateKey)); if(actives.length===0){ container.innerHTML='<div class="mobile-habit-empty text-sm text-white/60">Aucune habitude active.</div>'; return; }
     const rerenderSelf = ()=> populateHabits(dateKey, container, minimal);
     const isDayContainer = container && container.id === 'habitsList' ? false : (container && container.id === 'dayHabitsList');
     if(minimal || isSmall()){
@@ -2272,9 +2589,34 @@ function populateHabits(dateKey, container, minimal=false){
         row.dataset.habitName=h.name;
         const main=document.createElement('div');
         main.className='mobile-habit-main';
-        const button=makeHabitToggleButton(h, dateKey, rerenderSelf, { isDayView:isDayContainer });
+        const button=makeHabitToggleButton(h, dateKey, isDayContainer ? null : rerenderSelf, { isDayView:isDayContainer });
         main.appendChild(button);
         row.appendChild(main);
+        const refreshEditedRow = () => {
+            if(!isDayContainer){
+                rerenderSelf();
+                return;
+            }
+            row.dataset.habitName = h.name;
+            button.dataset.habitName = h.name;
+            button.textContent = h.name;
+            syncHabitToggleButtonState(button, h, dateKey, { isDayView:true });
+            refreshExpandedHomeMonth();
+        };
+        const removeDeletedRow = () => {
+            if(!isDayContainer){
+                rerenderSelf();
+                return;
+            }
+            row.remove();
+            markHomeRenderDirty();
+            if(!container.querySelector('.mobile-habit-row')){
+                const empty = document.createElement('div');
+                empty.className = 'mobile-habit-empty text-sm text-white/60';
+                empty.textContent = 'Aucune habitude active.';
+                container.insertBefore(empty, container.querySelector('.mobile-habit-gesture-hint'));
+            }
+        };
         bindHabitPointerGestures({
             row,
             activationElement:button,
@@ -2285,9 +2627,9 @@ function populateHabits(dateKey, container, minimal=false){
             rowSelector:'.mobile-habit-row',
             enableDrag:true,
             enableSwipe:true,
-            onEdited:rerenderSelf,
-            onDeleted:()=>{ rerenderSelf(); renderYears(); },
-            onReordered:rerenderSelf
+            onEdited:refreshEditedRow,
+            onDeleted:removeDeletedRow,
+            onReordered:isDayContainer ? refreshExpandedHomeMonth : rerenderSelf
         });
         container.appendChild(row);
     });
@@ -2313,24 +2655,32 @@ function populateHabits(dateKey, container, minimal=false){
         left.appendChild(handle);
     }
 
-    const toggleBtn=makeHabitToggleButton(h, dateKey, rerenderSelf, { isDayView: isDayContainer });
+    let badge = null;
+    const refreshBadge = () => {
+        const current = computeStreakForHabit(h.name, dateKey);
+        const best = Math.max(h.bestStreak || 0, computeBestStreakCached(h.name));
+        const replacement = makeStreakBadge(current, best, current >= best);
+        badge?.replaceWith(replacement);
+        badge = replacement;
+    };
+    const toggleBtn=makeHabitToggleButton(h, dateKey, refreshBadge, { isDayView: isDayContainer });
     left.append(toggleBtn);
     row.append(left);
 
     const right=document.createElement('div'); right.className='flex items-center gap-2';
     const curLabel=computeStreakForHabit(h.name, dateKey); const bestLabel=Math.max(h.bestStreak||0, computeBestStreakCached(h.name));
-    const badge=makeStreakBadge(curLabel, bestLabel, curLabel>=bestLabel);
+    badge=makeStreakBadge(curLabel, bestLabel, curLabel>=bestLabel);
 
     if(container !== dayHabitsList){
         const edit=document.createElement('button');
         edit.className='text-xs px-2 py-1 rounded hover:bg-white/5';
         edit.textContent='✏️';
         edit.setAttribute('aria-label', `Renommer ${h.name}`);
-        edit.onclick=()=>renameHabit(h, ()=>{ rerenderSelf(); renderYears(); });
+        edit.onclick=()=>renameHabit(h, ()=>{ rerenderSelf(); refreshHomeAfterHabitDefinitionChange(h.startDate); });
         const del = document.createElement('button');
         del.className = 'text-xs px-2 py-1 rounded hover:bg-white/5';
         del.textContent = '🗑️';
-        del.onclick=()=>deleteHabitFromDate(h, dateKey, ()=>{ rerenderSelf(); renderYears(); });
+        del.onclick=()=>deleteHabitFromDate(h, dateKey, ()=>{ rerenderSelf(); refreshHomeAfterHabitDefinitionChange(dateKey); });
 
         right.append(badge,edit,del);
     } else {
@@ -2391,8 +2741,9 @@ function makeMobileTaskRow(task){
         const currentIndex = TASK_STATUS_CYCLE.indexOf(task.status);
         task.status = TASK_STATUS_CYCLE[(currentIndex + 1) % TASK_STATUS_CYCLE.length];
         syncState();
-        const carried = rollForwardLaterTasks();
-        if(carried) rerenderTaskViews(task.date, { month:true });
+        syncRenderedTaskState(task);
+        refreshCompactProgress(task.date);
+        if(rollForwardLaterTasks()) markHomeRenderDirty();
         persistDebounced();
     };
     bindTaskKeyboardShortcuts(button, task);
@@ -2515,7 +2866,6 @@ function bindModeToggleSwipe(toggle, onModeChange, { commitDelay=0 } = {}){
 
 function setMobileDayMode(mode){
     mobileDayMode=mode === 'tasks' ? 'tasks' : 'habits';
-    localStorage.setItem('hbtrk-mobile-day-mode', mobileDayMode);
     syncMobileDayMode();
     if(focusedDateKey) showDayPage(focusedDateKey);
 }
@@ -2778,6 +3128,7 @@ function openYearModal(year){
 document.getElementById('closeYear').onclick=()=>{ yearModal.classList.add('hidden'); yearModal.classList.remove('flex'); };
 
 function goHome(){
+    if(homeRenderDirty) renderYears();
     homePage.classList.remove('hidden');
     dayPage.classList.add('hidden');
     syncPrimaryActionButton();
@@ -2796,7 +3147,7 @@ addHabitBtn.onclick = ()=>{
 
     // tous les jours actifs en vert
     Array.from(document.querySelectorAll('#weeklyDaysRow .dayToggle')).forEach(btn=>{
-    btn.classList.add('bg-[#31d874]','text-black','border-green-400/40');
+    btn.classList.add('bg-[#31d874]','text-black','border-[#68ef9c]/40');
     btn.classList.remove('bg-white/10','text-white/80','border-white/10');
     btn.setAttribute('aria-pressed', 'true');
     });
@@ -2852,12 +3203,12 @@ document.querySelectorAll('#weeklyDaysRow .dayToggle').forEach(btn=>{
     const active = btn.classList.contains('bg-[#31d874]');
     if (active){
         // passe en gris --> inactif
-        btn.classList.remove('bg-[#31d874]','text-black','border-green-400/40');
+        btn.classList.remove('bg-[#31d874]','text-black','border-[#68ef9c]/40');
         btn.classList.add('bg-white/10','text-white/80','border-white/10');
         btn.setAttribute('aria-pressed', 'false');
     } else {
         // passe en vert --> actif
-        btn.classList.add('bg-[#31d874]','text-black','border-green-400/40');
+        btn.classList.add('bg-[#31d874]','text-black','border-[#68ef9c]/40');
         btn.classList.remove('bg-white/10','text-white/80','border-white/10');
         btn.setAttribute('aria-pressed', 'true');
     }
@@ -2954,11 +3305,14 @@ addHabitForm.addEventListener('submit', async (event)=>{
     confirmAddHabit.disabled = true;
     try {
         clearHabitCaches(res.target.name);
-        await persistDebounced(0);
         modalAddHabit.classList.add('hidden');
         modalAddHabit.classList.remove('flex');
-        if (dayPage.classList.contains('hidden')) renderYears();
-        else showDayPage(focusedDateKey || formatDateKey(new Date()));
+        if (dayPage.classList.contains('hidden')) refreshHomeAfterHabitDefinitionChange(res.target.startDate);
+        else {
+            markHomeRenderDirty();
+            showDayPage(focusedDateKey || formatDateKey(new Date()));
+        }
+        persistDebounced(0);
     } finally {
         habitSubmitBusy = false;
         confirmAddHabit.disabled = false;
@@ -3320,9 +3674,8 @@ async function initFirebaseAll(){
     const previousUserId = currentUser?.uid || null;
     const nextUserId = user?.uid || null;
     if(previousUserId !== nextUserId){
+        resetScheduledPersistence();
         initialSynced = false;
-        lastLocalWriteRevision = -1;
-        lastLocalWriteId = '';
         focusedDateKey = null;
         docRef = null;
         data = { habits: [], tasks: [], taskRolloverSkips: {}, dayColors: {}, completions: {}, _rev: 0 };
@@ -3348,12 +3701,10 @@ async function initFirebaseAll(){
     unsubSnap = onSnapshot(docRef, (snap)=>{
         if (snap.exists()){
         const server = snap.data();
-        const serverRevision = Number.isFinite(Number(server?._rev)) ? Number(server._rev) : 0;
         if(initialSynced && snap.metadata.hasPendingWrites) return;
         const isOwnWriteAcknowledgement = initialSynced
-            && Boolean(lastLocalWriteId)
-            && server?._lastWriteId === lastLocalWriteId
-            && serverRevision === lastLocalWriteRevision;
+            && typeof server?._lastWriteId === 'string'
+            && server._lastWriteId.startsWith(`${clientSyncId}:`);
         if(isOwnWriteAcknowledgement) return;
         data = normalizeData(server);
         const carriedTaskCount = rollForwardLaterTasks();
@@ -3379,14 +3730,7 @@ async function initFirebaseAll(){
         router();
         initialSynced = true;
         } else {
-        renderYears();
-        if (focusedDateKey){
-            if(isSmall() || dayPage.classList.contains('hidden') === false) showDayPage(focusedDateKey);
-            else {
-                updateDayCell(focusedDateKey);
-                if(dayIsOpen) populateHabits(focusedDateKey, habitsList, false);
-            }
-        }
+        renderVisibleDataAfterFullChange({ remote:true });
         }
     }, (err)=>{
         console.error('onSnapshot error', err);
