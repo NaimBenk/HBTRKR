@@ -22,7 +22,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#080808">
   
-  <link rel="stylesheet" href="./dist/style.css?v=20260804-4">
+  <link rel="stylesheet" href="./dist/style.css?v=20260809-1">
 
   <style>
     :root{
@@ -31,10 +31,10 @@
       --gold-deep:#C9A227;
       --green:#31d874;
       --green-soft:#68ef9c;
-      --task-later:#f97316;
-      --task-later-deep:#ea580c;
-      --task-later-border:#fb923c;
-      --task-later-ink:#2a0c02;
+      --task-later:#c88562;
+      --task-later-deep:#a5674c;
+      --task-later-border:#d5a085;
+      --task-later-ink:#23130c;
       --bg:#0b0c10;
       --panel:#111318;
       --panel-soft:rgba(255,255,255,.055);
@@ -63,7 +63,7 @@
     .bar-muted { background: rgba(255,255,255,.15); }
     .chip { font-size:.75rem; padding:.2rem .5rem; border-radius:.4rem; border:1px solid rgba(255,255,255,.15); display:inline-flex; align-items:center; gap:.3rem; }
     .chip-neutral{ background: rgba(255,255,255,.06); color:#e6eef8; }
-    .chip-up{ background: rgba(34,197,94,.15); color:#d1fae5; }
+    .chip-up{ background: rgba(49,216,116,.15); color:#d9ffe8; }
     .chip-down{ background: rgba(239,68,68,.15); color:#fee2e2; }
     ::-webkit-scrollbar{width:8px;height:8px}
     ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:8px}
@@ -227,7 +227,7 @@ button:focus-visible, input:focus-visible, a:focus-visible {
 .app-button:hover { border-color: rgba(255,255,255,.2); background: rgba(255,255,255,.11); color:#fff; }
 .app-button.hidden { display: none; }
 .app-button--primary { border-color: rgba(104,239,156,.42); background: var(--green); color:#06150b; }
-.app-button--primary:hover { border-color: var(--green-soft); background:#46e384; color:#041009; }
+.app-button--primary:hover { border-color: var(--green-soft); background:var(--green); color:#041009; filter:brightness(1.06); }
 .app-button--ghost { background: transparent; border-color: transparent; }
 .app-button--compact { min-height: 2rem; padding: .35rem .7rem; }
 .app-button--icon { width: 2.1rem; height: 2.1rem; padding: 0; font-size: 1rem; }
@@ -389,10 +389,40 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 }
 .compact-task:hover { transform: translateY(-1px); border-color: rgba(255,255,255,.2); }
 .compact-task[data-status="done"] { background: rgba(49,216,116,.92); border-color: #68ef9c; color: #04150a; }
-.compact-task[data-status="later"] { background: linear-gradient(135deg, rgba(249,115,22,.96), rgba(234,88,12,.94)); border-color: var(--task-later-border); color: var(--task-later-ink); }
+.compact-task[data-status="later"] { background: linear-gradient(135deg, rgba(200,133,98,.92), rgba(165,103,76,.9)); border-color: var(--task-later-border); color: var(--task-later-ink); }
 .compact-task[data-status="skipped"] { background: rgba(240,82,82,.9); border-color: #ff8d8d; color: #210606; }
 .compact-add-task { width: 100%; margin-top: .32rem; padding: .28rem .4rem; border-radius: .45rem; color: rgba(255,255,255,.5); font-size: .6rem; text-align: left; }
 .compact-habit-list { display:grid; gap:.28rem; }
+.compact-habit-row {
+  position:relative;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  align-items:stretch;
+  gap:.25rem;
+  min-width:0;
+  isolation:isolate;
+  animation:task-enter .22s cubic-bezier(.2,.8,.2,1) both;
+}
+.compact-habit-row.is-dragging { z-index:20; opacity:.78; transform:scale(1.018); filter:drop-shadow(0 12px 18px rgba(0,0,0,.34)); }
+.compact-habit-row.is-dragging .habit-drag-handle { color:#07150c; border-color:var(--green-soft); background:var(--green); }
+.habit-drag-handle { font-size:0; }
+.habit-drag-handle::before {
+  content:"";
+  width:.78rem;
+  height:.62rem;
+  background:linear-gradient(currentColor,currentColor) 0 0/100% 1px no-repeat,linear-gradient(currentColor,currentColor) 0 50%/100% 1px no-repeat,linear-gradient(currentColor,currentColor) 0 100%/100% 1px no-repeat;
+}
+.habit-swipe-shell,
+.mobile-habit-main {
+  position:relative;
+  min-width:0;
+  overflow:hidden;
+  isolation:isolate;
+}
+.habit-swipe-shell { display:grid; border-radius:.52rem; }
+.mobile-habit-row { position:relative; width:100%; display:flex; justify-content:center; }
+.mobile-habit-main { display:grid; width:80%; border-radius:1.75rem; }
+.mobile-habit-main .habit-day-button { width:100%; }
 .compact-habit {
   display:grid;
   grid-template-columns:minmax(0,1fr) auto;
@@ -427,7 +457,12 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
   box-shadow: 0 8px 24px rgba(0,0,0,.16), inset 0 1px rgba(255,255,255,.13);
   backdrop-filter: blur(16px) saturate(125%);
   -webkit-backdrop-filter: blur(16px) saturate(125%);
+  touch-action:pan-y;
+  transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease;
 }
+.mobile-mode-toggle.is-swipe-tracking { transform:translateX(var(--mode-swipe-shift, 0)); }
+.mobile-mode-toggle[data-swipe-target="habits"] { border-color:rgba(49,216,116,.28); box-shadow:-8px 0 22px rgba(49,216,116,.1), inset 0 1px rgba(255,255,255,.13); }
+.mobile-mode-toggle[data-swipe-target="tasks"] { border-color:rgba(49,216,116,.28); box-shadow:8px 0 22px rgba(49,216,116,.1), inset 0 1px rgba(255,255,255,.13); }
 .mobile-mode-option {
   min-width: 5.7rem;
   padding: .42rem .72rem;
@@ -441,7 +476,7 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 .mobile-mode-option[aria-pressed="true"] { color: #edfff4; background: rgba(49,216,116,.5); box-shadow: inset 0 1px rgba(255,255,255,.17), 0 3px 12px rgba(49,216,116,.12); }
 .mobile-mode-option[aria-pressed="true"]:hover { color:#fff; background:rgba(49,216,116,.58); }
 .mobile-task-button[data-status="done"] { color: #04150a; background: rgba(49,216,116,.92); border-color: #68ef9c; }
-.mobile-task-button[data-status="later"] { color: var(--task-later-ink); background: linear-gradient(135deg, rgba(249,115,22,.96), rgba(234,88,12,.94)); border-color: var(--task-later-border); }
+.mobile-task-button[data-status="later"] { color: var(--task-later-ink); background: linear-gradient(135deg, rgba(200,133,98,.92), rgba(165,103,76,.9)); border-color: var(--task-later-border); }
 .mobile-task-button[data-status="skipped"] { color: #210606; background: rgba(240,82,82,.9); border-color: #ff8d8d; }
 .mobile-landscape-lock #appTitle { color: var(--gold); text-shadow: 0 0 14px rgba(255,215,0,.32); }
 
@@ -569,12 +604,19 @@ body:has([aria-modal="true"].flex) { overflow: hidden; }
 }
 .day-nav-pill > button { position: relative; z-index: 1; }
 #todayBtn {
-  color: #effff5;
-  border-color: rgba(104,239,156,.25);
-  background: rgba(49,216,116,.38);
-  box-shadow: inset 0 1px rgba(255,255,255,.16), 0 4px 16px rgba(49,216,116,.1);
+  color:rgba(255,255,255,.82);
+  border-color:rgba(255,255,255,.1);
+  background:rgba(255,255,255,.055);
+  box-shadow:inset 0 1px rgba(255,255,255,.09);
 }
-#todayBtn:hover { background: rgba(49,216,116,.46); }
+#todayBtn:hover { color:#fff; background:rgba(255,255,255,.09); }
+#todayBtn.is-selected-day {
+  color:#effff5;
+  border-color:rgba(104,239,156,.25);
+  background:rgba(49,216,116,.5);
+  box-shadow:inset 0 1px rgba(255,255,255,.16), 0 4px 16px rgba(49,216,116,.1);
+}
+#todayBtn.is-selected-day:hover { background:rgba(49,216,116,.58); }
 .mobile-day-color {
   position: absolute;
   right: max(0rem, env(safe-area-inset-right));
@@ -688,7 +730,8 @@ button:active:not(:disabled) { transform: scale(.97); }
 @keyframes modal-enter { from { opacity: 0; transform: translateY(.7rem) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
 
 .compact-task-row { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: stretch; isolation: isolate; }
-.task-drag-handle {
+.task-drag-handle,
+.habit-drag-handle {
   display: grid;
   place-items: center;
   width: 1.55rem;
@@ -704,8 +747,11 @@ button:active:not(:disabled) { transform: scale(.97); }
   -webkit-user-select: none;
 }
 .task-drag-handle:hover,
-.task-drag-handle:focus-visible { color: #fff; border-color: rgba(49,216,116,.38); background: rgba(49,216,116,.11); }
-.task-drag-handle:active { cursor: grabbing; }
+.task-drag-handle:focus-visible,
+.habit-drag-handle:hover,
+.habit-drag-handle:focus-visible { color:#fff; border-color:rgba(49,216,116,.38); background:rgba(49,216,116,.11); }
+.task-drag-handle:active,
+.habit-drag-handle:active { cursor:grabbing; }
 .task-swipe-shell,
 .mobile-task-main {
   position: relative;
@@ -716,22 +762,32 @@ button:active:not(:disabled) { transform: scale(.97); }
 }
 .task-swipe-shell { display: grid; border-radius: .45rem; }
 .compact-task,
-.compact-task-separator { width: 100%; touch-action: pan-y; }
+.compact-task-separator,
+.compact-habit,
+.habit-day-button { width:100%; touch-action:pan-y; }
 .mobile-task-main { border-radius: 1.75rem; }
 .compact-task,
 .mobile-task-button,
 .mobile-task-separator,
-.compact-task-separator { position: relative; z-index: 1; }
+.compact-task-separator,
+.compact-habit,
+.habit-day-button { position:relative; z-index:1; }
 .compact-task,
 .mobile-task-button,
 .mobile-task-separator,
-.compact-task-separator { transition: transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .18s ease, opacity .18s ease, filter .18s ease; }
+.compact-task-separator,
+.compact-habit,
+.habit-day-button { transition:transform .18s cubic-bezier(.2,.8,.2,1), box-shadow .18s ease, opacity .18s ease, filter .18s ease; }
 .is-swiping .compact-task,
 .is-swiping .mobile-task-button,
 .is-swiping .mobile-task-separator,
-.is-swiping .compact-task-separator { transition: none; }
+.is-swiping .compact-task-separator,
+.is-swiping .compact-habit,
+.is-swiping .habit-day-button { transition:none; }
 .task-swipe-shell::before,
-.mobile-task-main::before {
+.mobile-task-main::before,
+.habit-swipe-shell::before,
+.mobile-habit-main::before {
   content: "";
   position: absolute;
   z-index: 0;
@@ -747,6 +803,16 @@ button:active:not(:disabled) { transform: scale(.97); }
   transition: opacity .12s ease, background .16s ease, color .16s ease, box-shadow .16s ease, font-size .16s ease;
   pointer-events: none;
 }
+.habit-swipe-shell[data-swipe-direction="edit"][data-swipe-side="right"]::before,
+.mobile-habit-main[data-swipe-direction="edit"][data-swipe-side="right"]::before { content:"✎"; justify-content:flex-start; padding-left:.85rem; opacity:1; }
+.habit-swipe-shell[data-swipe-direction="edit"][data-swipe-side="left"]::before,
+.mobile-habit-main[data-swipe-direction="edit"][data-swipe-side="left"]::before { content:"✎"; justify-content:flex-end; padding-right:.85rem; opacity:1; }
+.habit-swipe-shell[data-swipe-direction="edit"][data-swipe-ready="true"]::before,
+.mobile-habit-main[data-swipe-direction="edit"][data-swipe-ready="true"]::before {
+  color:#effff5;
+  background:rgba(49,216,116,.62);
+  box-shadow:inset 0 0 0 2px rgba(255,255,255,.16);
+}
 .task-swipe-shell[data-swipe-direction="delete"][data-swipe-side="right"]::before,
 .mobile-task-main[data-swipe-direction="delete"][data-swipe-side="right"]::before { content: "✕"; justify-content: flex-start; padding-left: .85rem; opacity: 1; }
 .task-swipe-shell[data-swipe-direction="delete"][data-swipe-side="left"]::before,
@@ -760,13 +826,17 @@ button:active:not(:disabled) { transform: scale(.97); }
 .task-swipe-shell[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="left"]::before,
 .mobile-task-main[data-swipe-direction="delete"][data-swipe-ready="true"][data-swipe-side="left"]::before { color:#fff; background: linear-gradient(270deg, rgba(239,68,68,.98), rgba(127,29,29,.8)); }
 .task-swipe-shell[data-swipe-direction="flag"][data-swipe-ready="true"]::before,
-.mobile-task-main[data-swipe-direction="flag"][data-swipe-ready="true"]::before { color:#fff; background: linear-gradient(270deg, rgba(245,165,36,.96), rgba(180,83,9,.78)); }
+.mobile-task-main[data-swipe-direction="flag"][data-swipe-ready="true"]::before { color:#fff; background:linear-gradient(270deg, rgba(200,133,98,.88), rgba(140,82,58,.74)); }
 .task-swipe-shell[data-swipe-ready="true"]::before,
-.mobile-task-main[data-swipe-ready="true"]::before { font-size: 1.2rem; box-shadow: inset 0 0 0 2px rgba(255,255,255,.18); }
+.mobile-task-main[data-swipe-ready="true"]::before,
+.habit-swipe-shell[data-swipe-ready="true"]::before,
+.mobile-habit-main[data-swipe-ready="true"]::before { font-size:1.2rem; box-shadow:inset 0 0 0 2px rgba(255,255,255,.18); }
 .is-swipe-ready .compact-task,
 .is-swipe-ready .mobile-task-button,
 .is-swipe-ready .mobile-task-separator,
-.is-swipe-ready .compact-task-separator { filter: brightness(1.08) saturate(1.08); }
+.is-swipe-ready .compact-task-separator,
+.is-swipe-ready .compact-habit,
+.is-swipe-ready .habit-day-button { filter:brightness(1.08) saturate(1.04); }
 .is-swipe-committing { pointer-events: none; }
 .compact-task-row.is-dragging,
 .mobile-task-row.is-dragging { z-index: 20; opacity: .78; transform: scale(1.018); filter: drop-shadow(0 12px 18px rgba(0,0,0,.34)); }
@@ -804,7 +874,7 @@ button:active:not(:disabled) { transform: scale(.97); }
 .summary-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: .4rem; flex-wrap: wrap; }
 .summary-action { min-height: 2rem; padding: .38rem .7rem; border-radius: 999px; font-size: .7rem; font-weight: 750; white-space: nowrap; }
 .summary-action--primary { background: #31d874; border-color: #68ef9c; color: #04150a; }
-.summary-action--primary:hover { background: #4ae489; }
+.summary-action--primary:hover { background:var(--green); filter:brightness(1.06); }
 .summary-action[aria-pressed="true"] { background: linear-gradient(135deg, var(--gold), var(--gold-deep)); color: #0a0a0a; border-color: rgba(255,215,0,.65); }
 .exporting .no-export { display: none !important; }
 .exporting .modal-card { max-height: none !important; overflow: visible !important; }
@@ -816,6 +886,15 @@ button:active:not(:disabled) { transform: scale(.97); }
 
 @media (max-width: 900px) {
   .month-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .month-task-card.is-expanded .compact-calendar-wrap { overflow-x:hidden; }
+  .month-task-card.is-expanded .compact-calendar { min-width:100%; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.35rem; }
+  .month-task-card.is-expanded .compact-day { min-width:0; }
+  .compact-habit-row { grid-template-columns:.8rem minmax(0,1fr); gap:.12rem; }
+  .compact-habit-row .habit-drag-handle { width:.8rem; min-width:0; padding:0; border-color:transparent; background:transparent; }
+  .compact-habit-row .habit-drag-handle::before { width:.5rem; }
+  .compact-habit { grid-template-columns:minmax(0,1fr); min-height:1.75rem; padding:.28rem .24rem; font-size:.54rem; }
+  .compact-habit-name { display:-webkit-box; overflow:hidden; overflow-wrap:normal; word-break:normal; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+  .compact-habit-streak { display:none; }
 }
 @media (max-width: 639px) {
   .app-header-inner { min-height: 3.1rem; }
@@ -842,6 +921,9 @@ button:active:not(:disabled) { transform: scale(.97); }
   .expanded-month-controls { width:100%; justify-content:center; margin-left:0; }
   .expanded-month-mode-option { min-width:4.6rem; }
   .month-task-card.is-expanded .compact-calendar-wrap { padding-inline:.55rem; }
+  .month-task-card.is-expanded .compact-calendar-wrap { overflow-x:hidden; }
+  .month-task-card.is-expanded .compact-calendar { min-width:100%; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.28rem; }
+  .month-task-card.is-expanded .compact-day { min-width:0; padding:.38rem; }
 }
 @media (max-width: 359px) {
   .mobile-day-color { bottom: max(4.65rem, calc(4rem + env(safe-area-inset-bottom))); }
@@ -858,6 +940,9 @@ button:active:not(:disabled) { transform: scale(.97); }
 }
 .mobile-landscape-lock #homePage { padding-top: calc(5rem + env(safe-area-inset-top)); }
 .mobile-landscape-lock #dayPage { padding-top: calc(5rem + env(safe-area-inset-top)); }
+.mobile-landscape-lock .month-task-card.is-expanded .compact-calendar-wrap { overflow-x:hidden; }
+.mobile-landscape-lock .month-task-card.is-expanded .compact-calendar { min-width:100%; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.35rem; }
+.mobile-landscape-lock .month-task-card.is-expanded .compact-day { min-width:0; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
@@ -880,7 +965,7 @@ button:active:not(:disabled) { transform: scale(.97); }
       <div class="flex items-center gap-3">
         <button id="addHabitBtn" class="app-button app-button--compact">+ Habitude</button>
         <button id="burgerBtn" aria-label="Menu" aria-expanded="false" aria-controls="navPanel"
-                class="h-7 w-12 grid place-items-center rounded-full bg-white/10 hover:bg-white/15 border border-white/10 transition active:scale-95">
+                class="h-8 w-12 grid place-items-center rounded-full bg-white/10 hover:bg-white/15 border border-white/10 transition active:scale-95">
           <svg id="burgerIcon" width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
             <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
@@ -934,7 +1019,7 @@ button:active:not(:disabled) { transform: scale(.97); }
           <button id="prevDay" aria-label="Jour précédent" class="h-11 w-11 sm:h-10 sm:w-10 grid place-items-center rounded-full hover:bg-white/10 active:scale-95 transition focus:outline-none focus:ring-2 focus:ring-white/20">
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 6l-6 6 6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
-          <button id="todayBtn" class="h-11 sm:h-10 px-4 sm:px-5 rounded-full font-semibold text-xs bg-[rgb(0,200,75)] text-black border border-green-400/40 ring-1 ring-green-300/30 hover:brightness-95 active:scale-95 transition focus:outline-none focus:ring-2 focus:ring-green-300/50 flex items-center gap-2">
+          <button id="todayBtn" class="h-11 sm:h-10 px-4 sm:px-5 rounded-full font-semibold text-xs border active:scale-95 transition focus:outline-none focus:ring-2 focus:ring-green-300/50 flex items-center gap-2">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" opacity=".7"/><circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>
             <span>Aujourd'hui</span>
           </button>
@@ -975,17 +1060,17 @@ button:active:not(:disabled) { transform: scale(.97); }
           <div class="flex items-center justify-between mb-2">
             <div class="text-sm font-semibold">Hebdomadaire</div>
             <input id="freqWeeklyRadio" type="radio" name="freqMode" value="weekly"
-              class="w-4 h-4 accent-[rgb(0,200,75)]" aria-label="Fréquence hebdomadaire">
+              class="w-4 h-4 accent-[#31d874]" aria-label="Fréquence hebdomadaire">
           </div>
 
 <div id="weeklyDaysRow" class="flex gap-1">
-  <button type="button" data-dow="1" aria-label="Lundi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">L</button>
-  <button type="button" data-dow="2" aria-label="Mardi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">M</button>
-  <button type="button" data-dow="3" aria-label="Mercredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">M</button>
-  <button type="button" data-dow="4" aria-label="Jeudi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">J</button>
-  <button type="button" data-dow="5" aria-label="Vendredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">V</button>
-  <button type="button" data-dow="6" aria-label="Samedi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">S</button>
-  <button type="button" data-dow="0" aria-label="Dimanche" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[rgb(0,200,75)] text-black">D</button>
+  <button type="button" data-dow="1" aria-label="Lundi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">L</button>
+  <button type="button" data-dow="2" aria-label="Mardi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">M</button>
+  <button type="button" data-dow="3" aria-label="Mercredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">M</button>
+  <button type="button" data-dow="4" aria-label="Jeudi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">J</button>
+  <button type="button" data-dow="5" aria-label="Vendredi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">V</button>
+  <button type="button" data-dow="6" aria-label="Samedi" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">S</button>
+  <button type="button" data-dow="0" aria-label="Dimanche" aria-pressed="true" class="dayToggle flex-1 py-2 text-xs rounded-md font-semibold border-green-400/40 bg-[#31d874] text-black">D</button>
 </div>
 
 
@@ -1000,7 +1085,7 @@ button:active:not(:disabled) { transform: scale(.97); }
           <div class="flex items-center justify-between mb-2">
             <div class="text-sm font-semibold">Tous les X jours</div>
             <input id="freqIntervalRadio" type="radio" name="freqMode" value="interval"
-              class="w-4 h-4 accent-[rgb(0,200,75)]" aria-label="Fréquence tous les X jours">
+              class="w-4 h-4 accent-[#31d874]" aria-label="Fréquence tous les X jours">
           </div>
 
           <div class="flex items-center gap-2">
@@ -1021,7 +1106,7 @@ button:active:not(:disabled) { transform: scale(.97); }
           <div class="flex items-center justify-between mb-2">
             <div class="text-sm font-semibold">Chaque mois le…</div>
             <input id="freqMonthlyRadio" type="radio" name="freqMode" value="monthly"
-              class="w-4 h-4 accent-[rgb(0,200,75)]" aria-label="Fréquence mensuelle">
+              class="w-4 h-4 accent-[#31d874]" aria-label="Fréquence mensuelle">
           </div>
 
           <div class="flex items-center gap-2">
@@ -1219,6 +1304,6 @@ button:active:not(:disabled) { transform: scale(.97); }
   <script src="./dist/html2canvas-pro.min.js?v=20260803-1" defer
           onload="document.documentElement.dataset.pngExporter='ready'"
           onerror="document.documentElement.dataset.pngExporter='error'"></script>
-  <script type="module" src="./app.js?v=20260804-4"></script>
+  <script type="module" src="./app.js?v=20260809-1"></script>
 </body>
 </html>

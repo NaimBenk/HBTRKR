@@ -12,7 +12,7 @@ body { background: var(--bg); color: var(--text); }
 .bar-muted { background: rgba(255,255,255,.15); }
 .chip { font-size:.75rem; padding:.2rem .5rem; border-radius:.4rem; border:1px solid rgba(255,255,255,.15); display:inline-flex; align-items:center; gap:.3rem; }
 .chip-neutral{ background: rgba(255,255,255,.06); color:#e6eef8; }
-.chip-up{ background: rgba(34,197,94,.15); color:#d1fae5; }
+.chip-up{ background: rgba(49,216,116,.15); color:#d9ffe8; }
 .chip-down{ background: rgba(239,68,68,.15); color:#fee2e2; }
 ::-webkit-scrollbar{width:8px;height:8px}
 ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.06);border-radius:8px}

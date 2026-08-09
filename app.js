@@ -22,6 +22,8 @@ const firebaseConfig = { apiKey: "AIzaSyBptpMFEMc7ikXM0PtDOeWUHnMegKQ6hcs", auth
 
 let data = { habits: [], tasks: [], taskRolloverSkips: {}, dayColors: {}, completions: {}, _rev: 0 };
 let initialSynced = false;
+const clientSyncId = globalThis.crypto?.randomUUID?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+let localWriteSequence = 0;
 
 const HABIT_STATUS = Object.freeze({
     PENDING: 'pending',
@@ -844,6 +846,11 @@ function makeHomeMonthCard(y, m){
         tasksMode.setAttribute('aria-pressed', String(expandedMonthMode === 'tasks'));
         tasksMode.onclick=()=>setExpandedMonthMode('tasks', y, m);
         modeToggle.append(habitsMode, tasksMode);
+        bindModeToggleSwipe(
+            modeToggle,
+            () => setExpandedMonthMode('tasks', y, m),
+            () => setExpandedMonthMode('habits', y, m)
+        );
 
         const close=document.createElement('button');
         close.type='button';
@@ -1668,6 +1675,39 @@ function refreshExpandedHabitDay(dateKey){
     if(meta) meta.textContent = expandedMonthMeta(date.getFullYear(), date.getMonth(), 'habits');
 }
 
+function makeCompactHabitRow(habit, dateKey){
+    const date = parseDateKey(dateKey);
+    const refreshMonth = () => refreshHomeMonthCard(date.getFullYear(), date.getMonth());
+    const row = document.createElement('div');
+    row.className = 'compact-habit-row';
+    row.dataset.habitRow = '';
+    row.dataset.habitName = habit.name;
+    const handle = makeHabitDragHandle(habit, row, '.compact-habit-row', refreshMonth);
+    const swipeShell = document.createElement('div');
+    swipeShell.className = 'habit-swipe-shell';
+    const button = makeHabitToggleButton(
+        habit,
+        dateKey,
+        () => refreshExpandedHabitDay(dateKey),
+        { isCompactMonth:true }
+    );
+    bindHabitPointerGestures({
+        row,
+        activationElement:button,
+        swipeSurface:button,
+        revealElement:swipeShell,
+        habit,
+        rowSelector:'.compact-habit-row',
+        enableDrag:false,
+        enableSwipe:true,
+        onEdited:refreshMonth,
+        onReordered:refreshMonth
+    });
+    swipeShell.appendChild(button);
+    row.append(handle, swipeShell);
+    return row;
+}
+
 function makeCompactHabitDay(date){
     const dateKey = formatDateKey(date);
     const day = document.createElement('div');
@@ -1685,12 +1725,7 @@ function makeCompactHabitDay(date){
         empty.textContent = 'Repos';
         list.appendChild(empty);
     } else {
-        activeHabits.forEach(habit => list.appendChild(makeHabitToggleButton(
-            habit,
-            dateKey,
-            () => refreshExpandedHabitDay(dateKey),
-            { isCompactMonth:true }
-        )));
+        activeHabits.forEach(habit => list.appendChild(makeCompactHabitRow(habit, dateKey)));
     }
 
     day.append(makeCompactDayHead(date, dateKey, getCompletionRate(dateKey)), list);
@@ -1853,13 +1888,16 @@ const makeStreakBadge=(cur,best,isBestNow)=>{ const span=document.createElement(
 let persistTimer = null;
 let persistResolvers = [];
 let lastLocalWriteRevision = -1;
-const persistDebounced = (delay = 450) => new Promise(resolve => {
+let lastLocalWriteId = '';
+const persistDebounced = (delay = 120) => new Promise(resolve => {
     persistResolvers.push(resolve);
     clearTimeout(persistTimer);
     persistTimer = setTimeout(async () => {
         try {
             data._rev = (data._rev || 0) + 1;
             lastLocalWriteRevision = data._rev;
+            lastLocalWriteId = `${clientSyncId}:${Date.now()}:${++localWriteSequence}`;
+            data._lastWriteId = lastLocalWriteId;
             if(docRef) await setDoc(docRef, data);
         } catch(error){
             console.error('persist error', error);
@@ -1923,11 +1961,14 @@ function makeHabitToggleButton(h, dateKey, onChanged, opts = {}) {
     } else {
         const width = isDayView ? ['w-4/5'] : ['w-auto'];
         const textSize = isDayView ? 'text-xl' : 'text-xs';
-        btn.className = [ ...width,'px-4','py-3','rounded-full','border','transition', textSize,'font-semibold', done ? 'bg-[rgb(0,200,75)] border-green-400/40 ring-1 ring-green-300/30 text-black' : 'bg-white/5 border-white/10 hover:bg-white/10 text-white' ].join(' ');
+        btn.className = [ ...width,'px-4','py-3','rounded-full','border','transition', textSize,'font-semibold', done ? 'bg-[#31d874] border-green-400/40 ring-1 ring-green-300/30 text-black' : 'bg-white/5 border-white/10 hover:bg-white/10 text-white' ].join(' ');
+        if(isDayView) btn.classList.add('habit-day-button');
         btn.textContent = h.name;
     }
     btn.setAttribute('aria-label', `${h.name}, ${done ? 'faite' : 'à faire'}. Appuyer pour ${done ? 'décocher' : 'cocher'}.`);
     btn.onclick = async () => {
+    const row = btn.closest('[data-habit-row]');
+    if(row?.dataset.suppressClick === 'true') return;
     setHabitStatus(dateKey, h.name, done ? HABIT_STATUS.PENDING : HABIT_STATUS.DONE);
     const d = parseDateKey(dateKey);
     clearMonthCacheForHabit(h.name, d.getFullYear(), d.getMonth());
@@ -1937,6 +1978,204 @@ function makeHabitToggleButton(h, dateKey, onChanged, opts = {}) {
     await persistDebounced();
     };
     return btn;
+}
+
+async function renameHabit(habit, onChanged){
+    const proposed = await requestTextInput({
+        title:'Renommer l’habitude',
+        description:'Le nom doit rester unique parmi tes habitudes.',
+        value:habit.name,
+        placeholder:'Nom de l’habitude',
+        confirmLabel:'Enregistrer'
+    });
+    if(proposed === null) return false;
+    const newName = proposed.trim().replace(/\s+/g, ' ');
+    if(!newName || newName === habit.name) return false;
+    if(findHabitNameConflict(newName, habit)){
+        showToast('Ce nom est déjà utilisé.', 'error');
+        return false;
+    }
+    const oldName = habit.name;
+    habit.name = newName;
+    for(const dateKey in data.completions){
+        if(data.completions[dateKey] && Object.prototype.hasOwnProperty.call(data.completions[dateKey], oldName)){
+            data.completions[dateKey][newName] = data.completions[dateKey][oldName];
+            delete data.completions[dateKey][oldName];
+        }
+    }
+    clearHabitCaches(oldName);
+    clearHabitCaches(newName);
+    await persistDebounced(0);
+    if(typeof onChanged === 'function') onChanged();
+    else renderYears();
+    showToast('Habitude renommée.');
+    return true;
+}
+
+function applyHabitOrder(orderedNames){
+    const uniqueNames = [...new Set(orderedNames.filter(Boolean))];
+    const byName = new Map(data.habits.map(habit => [habit.name, habit]));
+    const orderedHabits = uniqueNames.map(name => byName.get(name)).filter(Boolean);
+    if(orderedHabits.length < 2) return false;
+    const orderedSet = new Set(orderedHabits);
+    const activeSlots = [];
+    data.habits.forEach((habit, index) => { if(orderedSet.has(habit)) activeSlots.push(index); });
+    activeSlots.forEach((slot, index) => { data.habits[slot] = orderedHabits[index]; });
+    return true;
+}
+
+function persistRenderedHabitOrder(container, rowSelector, onReordered){
+    const orderedNames = Array.from(container.querySelectorAll(rowSelector)).map(row => row.dataset.habitName).filter(Boolean);
+    if(!applyHabitOrder(orderedNames)) return;
+    clearAllCaches();
+    persistDebounced(0);
+    if(typeof onReordered === 'function') requestAnimationFrame(onReordered);
+}
+
+function bindHabitPointerGestures({ row, activationElement, swipeSurface, revealElement, habit, rowSelector, holdDelay=320, enableDrag=true, enableSwipe=true, dragOnMove=false, onEdited, onReordered }){
+    let state = null;
+    let holdTimer = null;
+    const surface = swipeSurface || activationElement;
+    const reveal = revealElement || row;
+    let detachWindowListeners = () => {};
+    const suppressClick = () => { row.dataset.suppressClick = 'true'; };
+    const releaseClick = () => window.setTimeout(() => { delete row.dataset.suppressClick; }, 120);
+    const resetSwipe = () => {
+        surface.style.transform = '';
+        row.classList.remove('is-swiping', 'is-swipe-ready');
+        delete reveal.dataset.swipeDirection;
+        delete reveal.dataset.swipeSide;
+        delete reveal.dataset.swipeReady;
+    };
+    const clearGesture = () => {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+        detachWindowListeners();
+        detachWindowListeners = () => {};
+        activationElement.style.touchAction = '';
+        state = null;
+    };
+    const startDrag = () => {
+        if(!state || state.dragging || state.swiping) return;
+        state.dragging = true;
+        suppressClick();
+        resetSwipe();
+        activationElement.style.touchAction = 'none';
+        row.classList.add('is-dragging');
+        navigator.vibrate?.(12);
+    };
+    const finishDrag = () => {
+        if(!state?.dragging) return;
+        row.classList.remove('is-dragging');
+        persistRenderedHabitOrder(row.parentElement, rowSelector, onReordered);
+    };
+    const updateSwipe = deltaX => {
+        const distance = Math.abs(deltaX);
+        const side = deltaX > 0 ? 'right' : 'left';
+        const ready = distance >= state.activationThreshold;
+        surface.style.transform = `translate3d(${deltaX}px,0,0)`;
+        row.classList.add('is-swiping');
+        row.classList.toggle('is-swipe-ready', ready);
+        if(distance < state.revealThreshold){
+            delete reveal.dataset.swipeDirection;
+            delete reveal.dataset.swipeSide;
+            delete reveal.dataset.swipeReady;
+            return;
+        }
+        reveal.dataset.swipeDirection = 'edit';
+        reveal.dataset.swipeSide = side;
+        reveal.dataset.swipeReady = String(ready);
+        if(ready !== state.thresholdReady) navigator.vibrate?.(ready ? 10 : 4);
+        state.thresholdReady = ready;
+    };
+    const onPointerMove = event => {
+        if(!state || state.id !== event.pointerId) return;
+        const deltaX = event.clientX - state.startX;
+        const deltaY = event.clientY - state.startY;
+        const verticalIntent = Math.abs(deltaY) > Math.abs(deltaX);
+        if(!state.dragging && dragOnMove && verticalIntent && Math.abs(deltaY) >= 5) startDrag();
+        if(state.dragging){
+            event.preventDefault();
+            reorderRowAtPointer(row, row.parentElement, rowSelector, event.clientY);
+            return;
+        }
+        const slop = state.pointerType === 'mouse' ? 9 : 18;
+        if(Math.abs(deltaY) > slop && verticalIntent){
+            clearTimeout(holdTimer);
+            holdTimer = null;
+            return;
+        }
+        if(enableSwipe && Math.abs(deltaX) > 8 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15){
+            clearTimeout(holdTimer);
+            holdTimer = null;
+            state.swiping = true;
+            suppressClick();
+            updateSwipe(deltaX);
+            event.preventDefault();
+        }
+    };
+    const onPointerUp = async event => {
+        if(!state || state.id !== event.pointerId) return;
+        clearTimeout(holdTimer);
+        const deltaX = event.clientX - state.startX;
+        if(state.dragging){
+            finishDrag();
+            releaseClick();
+            clearGesture();
+            return;
+        }
+        if(state.swiping){
+            const shouldEdit = Math.abs(deltaX) >= state.activationThreshold;
+            resetSwipe();
+            releaseClick();
+            clearGesture();
+            if(shouldEdit) await renameHabit(habit, onEdited);
+            return;
+        }
+        clearGesture();
+    };
+    const cancel = () => {
+        finishDrag();
+        resetSwipe();
+        releaseClick();
+        clearGesture();
+    };
+    activationElement.addEventListener('pointerdown', event => {
+        if(event.pointerType === 'mouse' && event.button !== 0) return;
+        if(state) cancel();
+        const width = Math.max(1, reveal.getBoundingClientRect().width);
+        state = {
+            id:event.pointerId,
+            pointerType:event.pointerType,
+            startX:event.clientX,
+            startY:event.clientY,
+            dragging:false,
+            swiping:false,
+            thresholdReady:false,
+            revealThreshold:Math.min(38, Math.max(24, width * .09)),
+            activationThreshold:Math.min(88, Math.max(58, width * .23))
+        };
+        try { activationElement.setPointerCapture(event.pointerId); } catch(error){}
+        window.addEventListener('pointermove', onPointerMove, { capture:true, passive:false });
+        window.addEventListener('pointerup', onPointerUp, { capture:true });
+        window.addEventListener('pointercancel', cancel, { capture:true });
+        detachWindowListeners = () => {
+            window.removeEventListener('pointermove', onPointerMove, true);
+            window.removeEventListener('pointerup', onPointerUp, true);
+            window.removeEventListener('pointercancel', cancel, true);
+        };
+        if(enableDrag) holdTimer = window.setTimeout(startDrag, holdDelay);
+    });
+}
+
+function makeHabitDragHandle(habit, row, rowSelector, onReordered){
+    const handle = document.createElement('button');
+    handle.type = 'button';
+    handle.className = 'habit-drag-handle';
+    handle.setAttribute('aria-label', `Déplacer ${habit.name}`);
+    handle.title = 'Maintenir puis glisser';
+    bindHabitPointerGestures({ row, activationElement:handle, habit, rowSelector, holdDelay:150, enableSwipe:false, dragOnMove:true, onReordered });
+    return handle;
 }
 
 function enableDragSort(container){
@@ -1977,7 +2216,37 @@ function populateHabits(dateKey, container, minimal=false){
     const rerenderSelf = ()=> populateHabits(dateKey, container, minimal);
     const isDayContainer = container && container.id === 'habitsList' ? false : (container && container.id === 'dayHabitsList');
     if(minimal || isSmall()){
-    actives.forEach(h=>{ const row=document.createElement('div'); row.className='w-full flex justify-center'; row.appendChild(makeHabitToggleButton(h, dateKey, rerenderSelf, { isDayView: isDayContainer })); container.appendChild(row); }); return; }
+    actives.forEach(h=>{
+        const row=document.createElement('div');
+        row.className='mobile-habit-row';
+        row.dataset.habitRow='';
+        row.dataset.habitName=h.name;
+        const main=document.createElement('div');
+        main.className='mobile-habit-main';
+        const button=makeHabitToggleButton(h, dateKey, rerenderSelf, { isDayView:isDayContainer });
+        main.appendChild(button);
+        row.appendChild(main);
+        bindHabitPointerGestures({
+            row,
+            activationElement:button,
+            swipeSurface:button,
+            revealElement:main,
+            habit:h,
+            rowSelector:'.mobile-habit-row',
+            enableDrag:true,
+            enableSwipe:true,
+            onEdited:rerenderSelf
+        });
+        container.appendChild(row);
+    });
+    if(isDayContainer){
+        const hint=document.createElement('div');
+        hint.className='mobile-task-gesture-hint mobile-habit-gesture-hint';
+        hint.textContent='Maintenir pour déplacer · glisser pour modifier';
+        container.appendChild(hint);
+    }
+    return;
+    }
 
     actives.forEach(h=>{
     const row=document.createElement('div'); row.className='flex items-center justify-between gap-2'; row.setAttribute('data-habit-row',''); row.setAttribute('data-habit-name', h.name);
@@ -2005,35 +2274,7 @@ function populateHabits(dateKey, container, minimal=false){
         edit.className='text-xs px-2 py-1 rounded hover:bg-white/5';
         edit.textContent='✏️';
         edit.setAttribute('aria-label', `Renommer ${h.name}`);
-        edit.onclick=async()=>{
-            const proposed=await requestTextInput({
-                title: 'Renommer l’habitude',
-                description: 'Le nom doit rester unique parmi tes habitudes.',
-                value: h.name,
-                placeholder: 'Nom de l’habitude',
-                confirmLabel: 'Enregistrer'
-            });
-            if(proposed === null) return;
-            const newName=proposed.trim().replace(/\s+/g, ' ');
-            if(!newName || newName===h.name) return;
-            if(findHabitNameConflict(newName, h)){
-                showToast('Ce nom est déjà utilisé.', 'error');
-                return;
-            }
-            const oldName=h.name;
-            h.name=newName;
-            for(const k in data.completions){
-                if(data.completions[k] && Object.prototype.hasOwnProperty.call(data.completions[k], oldName)){
-                    data.completions[k][h.name]=data.completions[k][oldName];
-                    delete data.completions[k][oldName];
-                }
-            }
-            clearHabitCaches(oldName);
-            clearHabitCaches(h.name);
-            await persistDebounced(0);
-            rerenderSelf();
-            renderYears();
-        };
+        edit.onclick=()=>renameHabit(h, ()=>{ rerenderSelf(); renderYears(); });
         const del = document.createElement('button');
         del.className = 'text-xs px-2 py-1 rounded hover:bg-white/5';
         del.textContent = '🗑️';
@@ -2159,6 +2400,54 @@ function syncMobileDayMode(){
     syncPrimaryActionButton();
 }
 
+function bindModeToggleSwipe(toggle, onSwipeLeft, onSwipeRight){
+    if(!toggle || toggle.dataset.swipeBound === 'true') return;
+    toggle.dataset.swipeBound = 'true';
+    let state = null;
+    let suppressClickUntil = 0;
+    const reset = () => {
+        toggle.classList.remove('is-swipe-tracking');
+        toggle.style.removeProperty('--mode-swipe-shift');
+        delete toggle.dataset.swipeTarget;
+        state = null;
+    };
+    toggle.addEventListener('click', event => {
+        if(performance.now() >= suppressClickUntil) return;
+        event.preventDefault();
+        event.stopPropagation();
+    }, true);
+    toggle.addEventListener('pointerdown', event => {
+        if(event.pointerType === 'mouse' && event.button !== 0) return;
+        state = { id:event.pointerId, startX:event.clientX, startY:event.clientY, swiping:false };
+        try { toggle.setPointerCapture(event.pointerId); } catch(error){}
+    });
+    toggle.addEventListener('pointermove', event => {
+        if(!state || state.id !== event.pointerId) return;
+        const deltaX = event.clientX - state.startX;
+        const deltaY = event.clientY - state.startY;
+        if(Math.abs(deltaX) < 8 || Math.abs(deltaX) <= Math.abs(deltaY) * 1.15) return;
+        state.swiping = true;
+        toggle.classList.add('is-swipe-tracking');
+        toggle.dataset.swipeTarget = deltaX < 0 ? 'tasks' : 'habits';
+        toggle.style.setProperty('--mode-swipe-shift', `${Math.max(-7, Math.min(7, deltaX * .08))}px`);
+        event.preventDefault();
+    });
+    toggle.addEventListener('pointerup', event => {
+        if(!state || state.id !== event.pointerId) return;
+        const deltaX = event.clientX - state.startX;
+        const deltaY = event.clientY - state.startY;
+        const shouldSwitch = state.swiping && Math.abs(deltaX) >= 34 && Math.abs(deltaX) > Math.abs(deltaY) * 1.15;
+        if(shouldSwitch){
+            suppressClickUntil = performance.now() + 220;
+            navigator.vibrate?.(8);
+            if(deltaX < 0) onSwipeLeft?.();
+            else onSwipeRight?.();
+        }
+        reset();
+    });
+    toggle.addEventListener('pointercancel', reset);
+}
+
 function setMobileDayMode(mode){
     mobileDayMode=mode === 'tasks' ? 'tasks' : 'habits';
     localStorage.setItem('hbtrk-mobile-day-mode', mobileDayMode);
@@ -2174,6 +2463,11 @@ function syncPrimaryActionButton(){
 
 mobileHabitsMode?.addEventListener('click', ()=>setMobileDayMode('habits'));
 mobileTasksMode?.addEventListener('click', ()=>setMobileDayMode('tasks'));
+bindModeToggleSwipe(
+    document.getElementById('mobileDayModeToggle'),
+    () => setMobileDayMode('tasks'),
+    () => setMobileDayMode('habits')
+);
 
 function applyMobileDayAppearance(dateKey){
     if(!dayPage) return;
@@ -2207,9 +2501,16 @@ function showDayPage(dateKey){
     syncMobileDayMode();
     if(mobileDayMode === 'tasks') populateMobileTasks(dateKey, dayHabitsList);
     else populateHabits(dateKey, dayHabitsList, true);
+    const todayKey = formatDateKey(new Date());
+    const todayButton = document.getElementById('todayBtn');
+    const isSelectedToday = dateKey === todayKey;
+    todayButton.classList.toggle('is-selected-day', isSelectedToday);
+    todayButton.setAttribute('aria-pressed', String(isSelectedToday));
+    if(isSelectedToday) todayButton.setAttribute('aria-current', 'date');
+    else todayButton.removeAttribute('aria-current');
     document.getElementById('prevDay').onclick=()=>{ const p=new Date(d); p.setDate(p.getDate()-1); showDayPage(formatDateKey(p)); };
     document.getElementById('nextDay').onclick=()=>{ const n=new Date(d); n.setDate(n.getDate()+1); showDayPage(formatDateKey(n)); };
-    document.getElementById('todayBtn').onclick=()=>{ const t=new Date(); showDayPage(formatDateKey(t)); };
+    todayButton.onclick=()=>showDayPage(todayKey);
     updateRouteHash(`#/day/${dateKey}`);
 }
 
@@ -2433,7 +2734,7 @@ addHabitBtn.onclick = ()=>{
 
     // tous les jours actifs en vert
     Array.from(document.querySelectorAll('#weeklyDaysRow .dayToggle')).forEach(btn=>{
-    btn.classList.add('bg-[rgb(0,200,75)]','text-black','border-green-400/40');
+    btn.classList.add('bg-[#31d874]','text-black','border-green-400/40');
     btn.classList.remove('bg-white/10','text-white/80','border-white/10');
     btn.setAttribute('aria-pressed', 'true');
     });
@@ -2486,15 +2787,15 @@ document.querySelectorAll('#weeklyDaysRow .dayToggle').forEach(btn=>{
     // forcer le mode weekly (l'utilisateur a touché aux jours)
     activateMode('weekly');
 
-    const active = btn.classList.contains('bg-[rgb(0,200,75)]');
+    const active = btn.classList.contains('bg-[#31d874]');
     if (active){
         // passe en gris --> inactif
-        btn.classList.remove('bg-[rgb(0,200,75)]','text-black','border-green-400/40');
+        btn.classList.remove('bg-[#31d874]','text-black','border-green-400/40');
         btn.classList.add('bg-white/10','text-white/80','border-white/10');
         btn.setAttribute('aria-pressed', 'false');
     } else {
         // passe en vert --> actif
-        btn.classList.add('bg-[rgb(0,200,75)]','text-black','border-green-400/40');
+        btn.classList.add('bg-[#31d874]','text-black','border-green-400/40');
         btn.classList.remove('bg-white/10','text-white/80','border-white/10');
         btn.setAttribute('aria-pressed', 'true');
     }
@@ -2550,7 +2851,7 @@ addHabitForm.addEventListener('submit', async (event)=>{
     habitPayload.mode = "weekly";
     const dayBtns = Array.from(document.querySelectorAll('#weeklyDaysRow .dayToggle'));
     habitPayload.daysOfWeek = dayBtns
-        .filter(btn => btn.classList.contains('bg-[rgb(0,200,75)]')) // vert = actif
+        .filter(btn => btn.classList.contains('bg-[#31d874]')) // vert = actif
         .map(btn => parseInt(btn.getAttribute('data-dow'), 10));
     if (habitPayload.daysOfWeek.length === 0) {
         showToast('Choisis au moins un jour pour la fréquence hebdomadaire.', 'error');
@@ -2959,6 +3260,7 @@ async function initFirebaseAll(){
     if(previousUserId !== nextUserId){
         initialSynced = false;
         lastLocalWriteRevision = -1;
+        lastLocalWriteId = '';
         focusedDateKey = null;
         docRef = null;
         data = { habits: [], tasks: [], taskRolloverSkips: {}, dayColors: {}, completions: {}, _rev: 0 };
@@ -2985,7 +3287,12 @@ async function initFirebaseAll(){
         if (snap.exists()){
         const server = snap.data();
         const serverRevision = Number.isFinite(Number(server?._rev)) ? Number(server._rev) : 0;
-        if(initialSynced && (snap.metadata.hasPendingWrites || serverRevision <= lastLocalWriteRevision)) return;
+        if(initialSynced && snap.metadata.hasPendingWrites) return;
+        const isOwnWriteAcknowledgement = initialSynced
+            && Boolean(lastLocalWriteId)
+            && server?._lastWriteId === lastLocalWriteId
+            && serverRevision === lastLocalWriteRevision;
+        if(isOwnWriteAcknowledgement) return;
         data = normalizeData(server);
         const carriedTaskCount = rollForwardLaterTasks();
         const migratedTaskGroups = Array.isArray(server.tasks) && server.tasks.some(task => task?.groupBreakBefore === true);
