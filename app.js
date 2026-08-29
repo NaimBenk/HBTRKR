@@ -22,6 +22,7 @@ const firebaseConfig = { apiKey: "AIzaSyBptpMFEMc7ikXM0PtDOeWUHnMegKQ6hcs", auth
 
 let data = { habits: [], tasks: [], taskRolloverSkips: {}, dayColors: {}, completions: {}, _rev: 0 };
 let initialSynced = false;
+let localPreviewMode = false;
 const clientSyncId = globalThis.crypto?.randomUUID?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
 let localWriteSequence = 0;
 
@@ -559,6 +560,10 @@ window.addEventListener('appinstalled', () => {
 });
 
 const appTitle = document.getElementById('appTitle');
+const syncStatus = document.getElementById('syncStatus');
+const syncStatusLabel = document.getElementById('syncStatusLabel');
+const homeModeControl = document.getElementById('homeModeControl');
+const homeModeToggle = document.getElementById('homeModeToggle');
 
 let focusedDateKey = null;
 const now = new Date(); const currentYear = now.getFullYear(); const currentMonth = now.getMonth();
@@ -903,18 +908,32 @@ function scrollExpandedMonthIntoView(year, month, dateKey = null){
     }));
 }
 
+function syncHomeModeControl(){
+    const visible = Boolean(expandedMonthKey) && !homePage.classList.contains('hidden');
+    homeModeControl?.classList.toggle('hidden', !visible);
+    document.documentElement.classList.toggle('has-home-mode-control', visible);
+    if(!visible || !homeModeToggle) return;
+    const [year, month] = expandedMonthKey.split('-').map(Number);
+    homeModeToggle.setAttribute('aria-label', `Contenu de ${monthNameLong(month)} ${year}`);
+    syncModeToggleVisual(homeModeToggle, expandedMonthMode);
+}
+
 function openExpandedMonth(year, month, mode = 'tasks', dateKey = null){
+    const todayKey = formatDateKey(new Date());
+    const today = parseDateKey(todayKey);
+    const targetDateKey = dateKey || (today.getFullYear() === year && today.getMonth() === month ? todayKey : null);
     const previousMonthKey = expandedMonthKey;
     expandedMonthKey = `${year}-${month}`;
     expandedMonthMode = mode === 'tasks' ? 'tasks' : 'habits';
-    expandedMonthFocusDateKey = dateKey;
+    expandedMonthFocusDateKey = targetDateKey;
     closeDayPanel();
     if(previousMonthKey && previousMonthKey !== expandedMonthKey){
         const [previousYear, previousMonth] = previousMonthKey.split('-').map(Number);
         refreshHomeMonthCard(previousYear, previousMonth);
     }
     refreshHomeMonthCard(year, month);
-    scrollExpandedMonthIntoView(year, month, dateKey);
+    syncHomeModeControl();
+    scrollExpandedMonthIntoView(year, month, targetDateKey);
 }
 
 function setExpandedMonthMode(mode, year, month){
@@ -924,6 +943,7 @@ function setExpandedMonthMode(mode, year, month){
     expandedMonthMode = nextMode;
     closeDayColorPicker();
     refreshHomeMonthCard(year, month);
+    syncHomeModeControl();
     scrollExpandedMonthIntoView(year, month, expandedMonthFocusDateKey);
 }
 
@@ -933,6 +953,7 @@ function closeExpandedMonth(year, month){
     expandedMonthFocusDateKey = null;
     closeDayColorPicker();
     refreshHomeMonthCard(year, month);
+    syncHomeModeControl();
     requestAnimationFrame(() => expandedMonthCard(year, month)?.scrollIntoView({ block:'center', inline:'nearest', behavior:'smooth' }));
 }
 
@@ -959,30 +980,6 @@ function makeHomeMonthCard(y, m){
     if(expanded){
         const controls=document.createElement('div');
         controls.className='expanded-month-controls';
-        const modeToggle=document.createElement('div');
-        modeToggle.className='mobile-mode-toggle expanded-month-mode-toggle';
-        modeToggle.setAttribute('role', 'group');
-        modeToggle.setAttribute('aria-label', `Contenu de ${monthNameLong(m)} ${y}`);
-        modeToggle.dataset.selectedMode=expandedMonthMode;
-        const habitsMode=document.createElement('button');
-        habitsMode.type='button';
-        habitsMode.className='mobile-mode-option expanded-month-mode-option';
-        habitsMode.dataset.mode='habits';
-        habitsMode.textContent='Habits';
-        habitsMode.setAttribute('aria-pressed', String(expandedMonthMode === 'habits'));
-        const tasksMode=document.createElement('button');
-        tasksMode.type='button';
-        tasksMode.className='mobile-mode-option expanded-month-mode-option';
-        tasksMode.dataset.mode='tasks';
-        tasksMode.textContent='Tasks';
-        tasksMode.setAttribute('aria-pressed', String(expandedMonthMode === 'tasks'));
-        modeToggle.append(habitsMode, tasksMode);
-        bindModeToggleSwipe(
-            modeToggle,
-            mode => setExpandedMonthMode(mode, y, m),
-            { commitDelay:180 }
-        );
-
         const close=document.createElement('button');
         close.type='button';
         close.className='expanded-month-close';
@@ -990,7 +987,7 @@ function makeHomeMonthCard(y, m){
         close.title='Fermer le mois';
         close.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
         close.onclick=()=>closeExpandedMonth(y,m);
-        controls.append(modeToggle, close);
+        controls.append(close);
         titleRow.append(mtitle, controls);
     } else {
         const expand=document.createElement('button');
@@ -1034,7 +1031,7 @@ function makeHomeMonthCard(y, m){
             btn.setAttribute('aria-label', parseDateKey(dk).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' }));
             applyDayCellStyle(btn, dk);
             if(dk===formatDateKey(new Date())){
-                btn.classList.add('ring-2','ring-white/10');
+                btn.classList.add('is-today');
                 btn.setAttribute('aria-current', 'date');
             }
             btn.onclick=()=>openExpandedMonth(y,m,'tasks',dk);
@@ -1990,6 +1987,7 @@ function renderYears(){
     const fragment = document.createDocumentFragment();
     for(let y=minYear;y<=maxYear;y++) ensureYearRendered(y, fragment);
     yearsContainer.appendChild(fragment);
+    syncHomeModeControl();
 }
 
 function markHomeRenderDirty(){
@@ -2142,70 +2140,142 @@ const clamp3 = (n)=>{ const s = String(Math.max(0, n|0)); return s.length>3 ? s.
 const makeStreakBadge=(cur,best,isBestNow)=>{ const span=document.createElement('span'); span.className='streak-badge'+(isBestNow && cur>0 ? ' streak-badge--best':'' ); span.textContent=`${clamp3(cur)}/${clamp3(best)}`; span.title='Série actuelle / meilleur record'; return span; };
 
 let persistTimer = null;
-let persistIdleHandle = null;
 let persistResolvers = [];
-let persistWriteInFlight = false;
-let persistWriteQueued = false;
+let persistRetryTimer = null;
+let persistRetryAttempt = 0;
+let persistenceDirty = false;
+let pendingServerWrites = 0;
+let persistenceGeneration = 0;
+let lastSuccessfulSyncAt = 0;
+
+function setSyncStatus(state, detail = ''){
+    if(!syncStatus || !syncStatusLabel) return;
+    const labels = {
+        loading:'Connexion…',
+        saving:'Sauvegarde…',
+        saved:'Sauvegardé',
+        offline:'Hors ligne',
+        error:'Erreur sync',
+        local:'Aperçu local'
+    };
+    const label = labels[state] || labels.loading;
+    syncStatus.dataset.state = state;
+    syncStatusLabel.textContent = label;
+    const savedTime = lastSuccessfulSyncAt
+        ? ` Dernière sauvegarde : ${new Date(lastSuccessfulSyncAt).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', second:'2-digit' })}.`
+        : '';
+    syncStatus.title = detail || `${label}.${savedTime}`;
+    syncStatus.setAttribute('aria-label', syncStatus.title);
+}
 
 function cancelScheduledPersistence(){
     clearTimeout(persistTimer);
     persistTimer = null;
-    if(persistIdleHandle !== null && typeof cancelIdleCallback === 'function') cancelIdleCallback(persistIdleHandle);
-    persistIdleHandle = null;
 }
 
 function schedulePersistenceFlush(delay){
     cancelScheduledPersistence();
     persistTimer = window.setTimeout(() => {
         persistTimer = null;
-        if(typeof requestIdleCallback === 'function'){
-            persistIdleHandle = requestIdleCallback(() => {
-                persistIdleHandle = null;
-                flushPersistence();
-            }, { timeout:220 });
-        } else {
-            persistTimer = window.setTimeout(() => {
-                persistTimer = null;
-                flushPersistence();
-            }, 0);
-        }
+        flushPersistence();
     }, Math.max(0, delay));
+}
+
+function schedulePersistenceRetry(){
+    clearTimeout(persistRetryTimer);
+    const delay = Math.min(30000, 1000 * (2 ** Math.min(persistRetryAttempt++, 5)));
+    persistRetryTimer = window.setTimeout(() => {
+        persistRetryTimer = null;
+        if(!navigator.onLine){
+            setSyncStatus('offline', 'Hors ligne. Les changements seront renvoyés automatiquement.');
+            return;
+        }
+        flushPersistence();
+    }, delay);
 }
 
 function resetScheduledPersistence(){
     cancelScheduledPersistence();
-    persistWriteQueued = false;
+    clearTimeout(persistRetryTimer);
+    persistRetryTimer = null;
+    persistRetryAttempt = 0;
+    persistenceDirty = false;
+    pendingServerWrites = 0;
+    persistenceGeneration++;
     const cancelledResolvers = persistResolvers.splice(0);
-    cancelledResolvers.forEach(done => done());
+    cancelledResolvers.forEach(done => done(false));
 }
 
 async function flushPersistence(){
-    if(persistWriteInFlight){
-        persistWriteQueued = true;
-        return;
+    cancelScheduledPersistence();
+    if(!persistenceDirty && !persistResolvers.length) return true;
+    if(!docRef){
+        persistenceDirty = true;
+        setSyncStatus(navigator.onLine ? 'loading' : 'offline');
+        return false;
     }
-    if(!persistResolvers.length) return;
-    persistWriteInFlight = true;
+    const generation = persistenceGeneration;
     const batchResolvers = persistResolvers.splice(0);
+    persistenceDirty = false;
+    data._rev = (data._rev || 0) + 1;
+    data._lastWriteId = `${clientSyncId}:${Date.now()}:${++localWriteSequence}`;
+    const payload = { ...exportableData(data), _rev:data._rev, _lastWriteId:data._lastWriteId };
+    pendingServerWrites++;
+    let writeFailed = false;
+    const writeWatchdog = window.setTimeout(() => {
+        if(generation !== persistenceGeneration) return;
+        setSyncStatus(navigator.onLine ? 'error' : 'offline', navigator.onLine
+            ? 'La sauvegarde prend anormalement longtemps. Firebase poursuit la reconnexion automatiquement.'
+            : 'Hors ligne. La sauvegarde reprendra automatiquement avec le réseau.');
+        if(!unsubSnap) ensureRealtimeSubscription();
+    }, 15000);
+    setSyncStatus(navigator.onLine ? 'saving' : 'offline', navigator.onLine
+        ? 'Sauvegarde Firebase en cours…'
+        : 'Hors ligne. La modification est conservée localement par Firebase.');
     try {
-        data._rev = (data._rev || 0) + 1;
-        data._lastWriteId = `${clientSyncId}:${Date.now()}:${++localWriteSequence}`;
-        if(docRef) await setDoc(docRef, data);
+        await setDoc(docRef, payload);
+        if(generation !== persistenceGeneration) return false;
+        persistRetryAttempt = 0;
+        lastSuccessfulSyncAt = Date.now();
+        batchResolvers.forEach(done => done(true));
+        return true;
     } catch(error){
+        if(generation !== persistenceGeneration) return false;
+        writeFailed = true;
         console.error('persist error', error);
-        showToast('Synchronisation impossible. Les changements seront retentés à la prochaine action.', 'error');
+        persistenceDirty = true;
+        batchResolvers.forEach(done => done(false));
+        if(navigator.onLine){
+            setSyncStatus('error', 'Échec de la sauvegarde. Nouvelle tentative automatique en cours.');
+            schedulePersistenceRetry();
+        } else {
+            setSyncStatus('offline', 'Hors ligne. Nouvelle tentative automatique dès le retour du réseau.');
+        }
+        showToast('Synchronisation interrompue. Nouvelle tentative automatique.', 'error');
+        return false;
     } finally {
-        batchResolvers.forEach(done => done());
-        persistWriteInFlight = false;
-        if(persistWriteQueued || persistResolvers.length){
-            persistWriteQueued = false;
+        clearTimeout(writeWatchdog);
+        if(generation !== persistenceGeneration) return;
+        pendingServerWrites = Math.max(0, pendingServerWrites - 1);
+        if(!writeFailed && (persistenceDirty || persistResolvers.length)){
             schedulePersistenceFlush(0);
+        } else if(!writeFailed && pendingServerWrites === 0 && lastSuccessfulSyncAt){
+            setSyncStatus('saved');
         }
     }
 }
 
 const persistDebounced = (delay = 120) => new Promise(resolve => {
+    if(localPreviewMode){
+        setSyncStatus('local', 'Aperçu local : aucune donnée n’est envoyée à Firebase.');
+        resolve(true);
+        return;
+    }
+    persistenceDirty = true;
     persistResolvers.push(resolve);
+    setSyncStatus(navigator.onLine ? 'saving' : 'offline', navigator.onLine
+        ? 'Modification en attente de sauvegarde…'
+        : 'Hors ligne. La modification sera envoyée automatiquement.');
     schedulePersistenceFlush(delay);
 });
 
@@ -2236,8 +2306,28 @@ function scheduleTaskRollover(){
 }
 
 document.addEventListener('visibilitychange', () => {
-    if(document.visibilityState === 'visible') processTaskRollovers();
+    if(document.visibilityState === 'hidden'){
+        flushPersistence();
+        return;
+    }
+    processTaskRollovers();
+    ensureRealtimeSubscription();
+    if(persistenceDirty || persistResolvers.length) flushPersistence();
 });
+window.addEventListener('pagehide', () => { flushPersistence(); });
+window.addEventListener('pageshow', () => {
+    ensureRealtimeSubscription();
+    if(persistenceDirty || persistResolvers.length) flushPersistence();
+});
+window.addEventListener('online', () => {
+    setSyncStatus(persistenceDirty || pendingServerWrites ? 'saving' : 'loading', 'Connexion retrouvée. Vérification Firebase…');
+    ensureRealtimeSubscription();
+    if(persistenceDirty || persistResolvers.length) flushPersistence();
+});
+window.addEventListener('offline', () => {
+    if(currentUser) setSyncStatus('offline', 'Hors ligne. Les changements sont conservés localement et seront synchronisés automatiquement.');
+});
+document.addEventListener('freeze', () => { flushPersistence(); });
 
 function syncHabitToggleButtonState(btn, h, dateKey, opts = {}){
     const { isCompactMonth = false } = opts;
@@ -2355,6 +2445,8 @@ async function deleteHabitFromDate(habit, dateKey, onChanged){
     clearHabitCaches(habit.name);
     if(typeof onChanged === 'function') onChanged();
     else renderYears();
+    syncHomeModeControl();
+    syncMobileDayMode();
     persistDebounced(0);
     showToast('Habitude supprimée à partir de cette date.');
 }
@@ -2881,6 +2973,15 @@ bindModeToggleSwipe(
     mode => setMobileDayMode(mode)
 );
 
+bindModeToggleSwipe(
+    homeModeToggle,
+    mode => {
+        if(!expandedMonthKey) return;
+        const [year, month] = expandedMonthKey.split('-').map(Number);
+        setExpandedMonthMode(mode, year, month);
+    }
+);
+
 function applyMobileDayAppearance(dateKey){
     if(!dayPage) return;
     const color = dayColorFor(dateKey);
@@ -2916,6 +3017,7 @@ function showDayPage(dateKey){
     const todayKey = formatDateKey(new Date());
     const todayButton = document.getElementById('todayBtn');
     const isSelectedToday = dateKey === todayKey;
+    dayPage.classList.toggle('is-current-day', isSelectedToday);
     todayButton.classList.toggle('is-selected-day', isSelectedToday);
     todayButton.setAttribute('aria-pressed', String(isSelectedToday));
     if(isSelectedToday) todayButton.setAttribute('aria-current', 'date');
@@ -2923,6 +3025,7 @@ function showDayPage(dateKey){
     document.getElementById('prevDay').onclick=()=>{ const p=new Date(d); p.setDate(p.getDate()-1); showDayPage(formatDateKey(p)); };
     document.getElementById('nextDay').onclick=()=>{ const n=new Date(d); n.setDate(n.getDate()+1); showDayPage(formatDateKey(n)); };
     todayButton.onclick=()=>showDayPage(todayKey);
+    syncHomeModeControl();
     updateRouteHash(`#/day/${dateKey}`);
 }
 
@@ -3132,6 +3235,7 @@ function goHome(){
     homePage.classList.remove('hidden');
     dayPage.classList.add('hidden');
     syncPrimaryActionButton();
+    syncHomeModeControl();
     updateRouteHash('#/home', !window.location.hash);
     focusCurrentMonth();
 }
@@ -3368,6 +3472,9 @@ bindOverlayClose(yearModal, ()=>{ yearModal.classList.add('hidden'); yearModal.c
 bindOverlayClose(modalInstall, ()=>{ modalInstall.classList.add('hidden'); modalInstall.classList.remove('flex'); });
 
 let app, db, docRef, unsubSnap, auth, currentUser;
+let snapshotRetryTimer = null;
+let snapshotRetryAttempt = 0;
+let lastAppliedSnapshotSignature = '';
 
 const authModal   = document.getElementById('authModal');
 const authForm    = document.getElementById('authForm');
@@ -3642,6 +3749,102 @@ function setAuthedUI(authed){
     }
 }
 
+function clearRealtimeSubscription(){
+    clearTimeout(snapshotRetryTimer);
+    snapshotRetryTimer = null;
+    if(unsubSnap){
+        try { unsubSnap(); } catch(error){}
+        unsubSnap = null;
+    }
+}
+
+function scheduleRealtimeReconnect(){
+    clearTimeout(snapshotRetryTimer);
+    const delay = Math.min(30000, 1000 * (2 ** Math.min(snapshotRetryAttempt++, 5)));
+    snapshotRetryTimer = window.setTimeout(() => {
+        snapshotRetryTimer = null;
+        ensureRealtimeSubscription();
+    }, delay);
+}
+
+function snapshotSignature(server){
+    return `${Number(server?._rev) || 0}|${String(server?._lastWriteId || '')}`;
+}
+
+function applyRealtimeSnapshot(snap){
+    const fromServer = !snap.metadata.fromCache;
+    if(!navigator.onLine){
+        setSyncStatus('offline', 'Hors ligne. Affichage des données conservées sur cet appareil.');
+    } else if(!fromServer){
+        setSyncStatus(persistenceDirty || pendingServerWrites ? 'saving' : 'loading', 'Vérification des données Firebase…');
+    } else if(!persistenceDirty && pendingServerWrites === 0){
+        lastSuccessfulSyncAt = Date.now();
+        setSyncStatus('saved');
+    }
+
+    if(snap.exists()){
+        const server = snap.data();
+        const signature = snapshotSignature(server);
+        if(initialSynced && (snap.metadata.hasPendingWrites || persistenceDirty || pendingServerWrites > 0)) return;
+        const isOwnWriteAcknowledgement = initialSynced
+            && typeof server?._lastWriteId === 'string'
+            && server._lastWriteId.startsWith(`${clientSyncId}:`);
+        if(isOwnWriteAcknowledgement){
+            lastAppliedSnapshotSignature = signature;
+            return;
+        }
+        if(initialSynced && signature === lastAppliedSnapshotSignature) return;
+        lastAppliedSnapshotSignature = signature;
+        data = normalizeData(server);
+        const carriedTaskCount = rollForwardLaterTasks();
+        const migratedTaskGroups = Array.isArray(server.tasks) && server.tasks.some(task => task?.groupBreakBefore === true);
+        const serverRolloverTasks = Array.isArray(server.tasks) ? server.tasks.filter(task => task?.rolloverFromId) : [];
+        const normalizedRolloverTasks = data.tasks.filter(task => task?.rolloverFromId);
+        const savedRolloverSkips = normalizeTaskRolloverSkips(server.taskRolloverSkips);
+        const inferredRolloverSkips = Object.entries(data.taskRolloverSkips || {}).some(([dateKey, rootIds]) =>
+            rootIds.some(rootId => !savedRolloverSkips[dateKey]?.includes(rootId))
+        );
+        const migratedTaskRollovers = serverRolloverTasks.length !== normalizedRolloverTasks.length
+            || serverRolloverTasks.some(task => !task.rolloverRootId)
+            || inferredRolloverSkips;
+        if(carriedTaskCount || migratedTaskGroups || migratedTaskRollovers) persistDebounced(0);
+        clearAllCaches();
+    } else {
+        data = { habits:[], tasks:[], taskRolloverSkips:{}, dayColors:{}, completions:{}, _rev:0 };
+        lastAppliedSnapshotSignature = '';
+        persistDebounced(0);
+    }
+
+    if(!initialSynced){
+        renderYears();
+        router();
+        initialSynced = true;
+    } else {
+        renderVisibleDataAfterFullChange({ remote:true });
+    }
+}
+
+function ensureRealtimeSubscription(){
+    if(!currentUser || !docRef || unsubSnap) return;
+    const subscribedRef = docRef;
+    unsubSnap = onSnapshot(subscribedRef, { includeMetadataChanges:true }, snap => {
+        if(docRef !== subscribedRef) return;
+        snapshotRetryAttempt = 0;
+        applyRealtimeSnapshot(snap);
+    }, error => {
+        if(docRef !== subscribedRef) return;
+        console.error('onSnapshot error', error);
+        unsubSnap = null;
+        setSyncStatus(navigator.onLine ? 'error' : 'offline', navigator.onLine
+            ? 'Connexion Firebase interrompue. Reconnexion automatique en cours.'
+            : 'Hors ligne. Reconnexion automatique dès le retour du réseau.');
+        if(!initialSynced){
+            homePage.innerHTML = '<div class="compact-empty"><strong>Synchronisation momentanément indisponible.</strong><br>Reconnexion automatique en cours…</div>';
+        }
+        scheduleRealtimeReconnect();
+    });
+}
+
 async function initFirebaseAll(){
     await loadFirebaseSdk();
     // initialise Firebase app
@@ -3669,74 +3872,32 @@ async function initFirebaseAll(){
         console.warn('auth persistence unavailable', error);
     }
 
-    // le reste reste identique
     onAuthStateChanged(auth, async (user)=>{
-    const previousUserId = currentUser?.uid || null;
-    const nextUserId = user?.uid || null;
-    if(previousUserId !== nextUserId){
-        resetScheduledPersistence();
-        initialSynced = false;
-        focusedDateKey = null;
-        docRef = null;
-        data = { habits: [], tasks: [], taskRolloverSkips: {}, dayColors: {}, completions: {}, _rev: 0 };
-        clearAllCaches();
-    }
-    currentUser = user || null;
+        const previousUserId = currentUser?.uid || null;
+        const nextUserId = user?.uid || null;
+        clearRealtimeSubscription();
+        if(previousUserId !== nextUserId){
+            resetScheduledPersistence();
+            initialSynced = false;
+            focusedDateKey = null;
+            docRef = null;
+            lastAppliedSnapshotSignature = '';
+            data = { habits: [], tasks: [], taskRolloverSkips: {}, dayColors: {}, completions: {}, _rev: 0 };
+            clearAllCaches();
+        }
+        currentUser = user || null;
 
-    if (unsubSnap) {
-        try { unsubSnap(); } catch(e){}
-        unsubSnap = null;
-    }
-
-    if (!currentUser){
-        setAuthedUI(false);
-        return;
-    }
-
-    setAuthedUI(true);
-    homePage.innerHTML = '<div class="py-24 text-center text-sm text-white/50">Synchronisation de votre calendrier…</div>';
-
-    docRef = doc(db, 'users', currentUser.uid, 'data', 'fourpill');
-
-    unsubSnap = onSnapshot(docRef, (snap)=>{
-        if (snap.exists()){
-        const server = snap.data();
-        if(initialSynced && snap.metadata.hasPendingWrites) return;
-        const isOwnWriteAcknowledgement = initialSynced
-            && typeof server?._lastWriteId === 'string'
-            && server._lastWriteId.startsWith(`${clientSyncId}:`);
-        if(isOwnWriteAcknowledgement) return;
-        data = normalizeData(server);
-        const carriedTaskCount = rollForwardLaterTasks();
-        const migratedTaskGroups = Array.isArray(server.tasks) && server.tasks.some(task => task?.groupBreakBefore === true);
-        const serverRolloverTasks = Array.isArray(server.tasks) ? server.tasks.filter(task => task?.rolloverFromId) : [];
-        const normalizedRolloverTasks = data.tasks.filter(task => task?.rolloverFromId);
-        const savedRolloverSkips = normalizeTaskRolloverSkips(server.taskRolloverSkips);
-        const inferredRolloverSkips = Object.entries(data.taskRolloverSkips || {}).some(([dateKey, rootIds]) =>
-            rootIds.some(rootId => !savedRolloverSkips[dateKey]?.includes(rootId))
-        );
-        const migratedTaskRollovers = serverRolloverTasks.length !== normalizedRolloverTasks.length
-            || serverRolloverTasks.some(task => !task.rolloverRootId)
-            || inferredRolloverSkips;
-        if(carriedTaskCount || migratedTaskGroups || migratedTaskRollovers) persistDebounced(0);
-        clearAllCaches();
-        } else {
-        data = { habits:[], tasks:[], taskRolloverSkips:{}, dayColors:{}, completions:{}, _rev:0 };
-        setDoc(docRef, data).catch(console.error);
+        if(!currentUser){
+            setAuthedUI(false);
+            setSyncStatus('loading');
+            return;
         }
 
-        if (!initialSynced){
-        renderYears();
-        router();
-        initialSynced = true;
-        } else {
-        renderVisibleDataAfterFullChange({ remote:true });
-        }
-    }, (err)=>{
-        console.error('onSnapshot error', err);
-        homePage.innerHTML = '<div class="compact-empty"><strong>Synchronisation indisponible.</strong><br>Vérifie ta connexion puis recharge la page.</div>';
-        showToast('Impossible de synchroniser vos données.', 'error');
-    });
+        setAuthedUI(true);
+        setSyncStatus(navigator.onLine ? 'loading' : 'offline');
+        homePage.innerHTML = '<div class="py-24 text-center text-sm text-white/50">Synchronisation de votre calendrier…</div>';
+        docRef = doc(db, 'users', currentUser.uid, 'data', 'fourpill');
+        ensureRealtimeSubscription();
     });
 }
 
@@ -3802,6 +3963,7 @@ function buildLocalPreviewData(){
 }
 
 function initLocalPreview(){
+    localPreviewMode = true;
     data = buildLocalPreviewData();
     rollForwardLaterTasks();
     clearAllCaches();
@@ -3810,6 +3972,7 @@ function initLocalPreview(){
     menuLogout.disabled = true;
     menuLogout.textContent = 'Aperçu local';
     menuLogout.title = 'Les données de cet aperçu ne sont pas synchronisées.';
+    setSyncStatus('local', 'Aperçu local : aucune donnée n’est envoyée à Firebase.');
     renderYears();
     router();
     initialSynced = true;
@@ -3826,6 +3989,7 @@ function initLocalPreview(){
         await initFirebaseAll();
     } catch(error){
         console.error('initialization error', error);
+        setSyncStatus(navigator.onLine ? 'error' : 'offline');
         headerEl?.classList.remove('hidden');
         homePage?.classList.remove('hidden');
         homePage.innerHTML = '<div class="compact-empty"><strong>HBTRK ne peut pas démarrer.</strong><br>Vérifie ta connexion internet puis recharge la page.</div>';
