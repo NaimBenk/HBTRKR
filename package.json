@@ -5,7 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/serve.mjs",
-    "check": "node --check app.js && npm run build:css",
+    "check": "node --check app.js && npm test && npm run build:css",
+    "test": "node --test scripts/*.test.mjs",
     "build:css": "npx @tailwindcss/cli -i ./src/input.css -o ./dist/style.css --minify"
   },
   "repository": {

@@ -1,5 +1,8 @@
+import { SyncClient } from './src/sync-client.mjs?v=20260907-1';
+import { SYNC_DOCUMENT, SYNC_VERSION, habitId, commitBatch, initializeDocument, equal } from './src/sync-model.mjs';
+
 let initializeApp;
-let initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, doc, onSnapshot, setDoc;
+let initializeFirestore, memoryLocalCache, doc, onSnapshot, runTransaction;
 let getAuth, onAuthStateChanged, setPersistence, browserLocalPersistence;
 let signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail;
 
@@ -10,7 +13,7 @@ async function loadFirebaseSdk(){
         import('https://www.gstatic.com/firebasejs/10.12.4/firebase-auth.js')
     ]);
     ({ initializeApp } = appModule);
-    ({ initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager, doc, onSnapshot, setDoc } = firestoreModule);
+    ({ initializeFirestore, memoryLocalCache, doc, onSnapshot, runTransaction } = firestoreModule);
     ({
         getAuth, onAuthStateChanged, setPersistence, browserLocalPersistence,
         signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail
@@ -23,8 +26,7 @@ const firebaseConfig = { apiKey: "AIzaSyBptpMFEMc7ikXM0PtDOeWUHnMegKQ6hcs", auth
 let data = { habits: [], tasks: [], taskRolloverSkips: {}, dayColors: {}, completions: {}, _rev: 0 };
 let initialSynced = false;
 let localPreviewMode = false;
-const clientSyncId = globalThis.crypto?.randomUUID?.() || `client-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-let localWriteSequence = 0;
+let syncClient = null;
 
 const HABIT_STATUS = Object.freeze({
     PENDING: 'pending',
@@ -104,7 +106,7 @@ function normalizeHabitRecord(rawHabit){
         else return null;
     }
 
-    const habit = { name, startDate, mode, daysOfWeek:null, everyXDays:null, dayOfMonth:null };
+    const habit = { id:habitId({ ...rawHabit, name }), name, startDate, mode, daysOfWeek:null, everyXDays:null, dayOfMonth:null };
     if(mode === 'weekly'){
         const fallbackDays = rawHabit.frequency === 'daily' ? [0,1,2,3,4,5,6] : rawHabit.frequency === 'weekly' ? [1] : [];
         const sourceDays = Array.isArray(rawHabit.daysOfWeek) ? rawHabit.daysOfWeek : fallbackDays;
@@ -223,7 +225,7 @@ function normalizeData(raw){
             uniqueTasks.push(task);
             return;
         }
-        const duplicateKey = `${task.date}|${normalizedTaskName(task.name)}`;
+        const duplicateKey = task.rolloverFromId ? `${task.date}|${taskRolloverRootId(task)}` : task.id;
         const existing = taskByDateAndName.get(duplicateKey);
         if(!existing){
             taskByDateAndName.set(duplicateKey, task);
@@ -288,6 +290,7 @@ function exportableData(source = data){
     const normalized = normalizeData(source);
     return {
         habits: normalized.habits.map(habit => ({
+            id: habit.id,
             name: habit.name,
             startDate: habit.startDate,
             mode: habit.mode,
@@ -564,6 +567,7 @@ const syncStatus = document.getElementById('syncStatus');
 const syncStatusLabel = document.getElementById('syncStatusLabel');
 const homeModeControl = document.getElementById('homeModeControl');
 const homeModeToggle = document.getElementById('homeModeToggle');
+const undoButton = document.getElementById('undoButton');
 
 let focusedDateKey = null;
 const now = new Date(); const currentYear = now.getFullYear(); const currentMonth = now.getMonth();
@@ -692,6 +696,7 @@ function addHabitSmart(habitObj){
     if (duplicate) return { action: 'duplicate', target: duplicate };
 
     const created = {
+        id: crypto.randomUUID(),
         name: cleanName,
         startDate: habitObj.startDate,
         mode: habitObj.mode,
@@ -1107,7 +1112,7 @@ function rollForwardLaterTasks(){
         const targetNameKey = `name:${normalizedTaskName(task.name)}|${targetDate}`;
         if(isTaskRolloverSkipped(rootId, targetDate) || occupiedTargets.has(targetKey) || occupiedTargets.has(targetNameKey)) continue;
         const copy = {
-            id: makeTaskId(),
+            id: `rollover:${rootId}:${targetDate}`,
             name: task.name,
             date: targetDate,
             kind: 'task',
@@ -1337,6 +1342,8 @@ async function renameTask(task){
         confirmLabel:'Enregistrer'
     });
     if(proposed === null) return false;
+    task = data.tasks.find(current => current.id === task.id);
+    if(!task){ showToast('Cette tâche a été supprimée sur un autre appareil.', 'error'); return false; }
     const nextName = proposed.trim().replace(/\s+/g, ' ');
     if(!nextName || nextName === task.name) return false;
     if(findTaskNameConflict(nextName, task.date, task)){
@@ -2140,32 +2147,30 @@ const clamp3 = (n)=>{ const s = String(Math.max(0, n|0)); return s.length>3 ? s.
 const makeStreakBadge=(cur,best,isBestNow)=>{ const span=document.createElement('span'); span.className='streak-badge'+(isBestNow && cur>0 ? ' streak-badge--best':'' ); span.textContent=`${clamp3(cur)}/${clamp3(best)}`; span.title='Série actuelle / meilleur record'; return span; };
 
 let persistTimer = null;
-let persistResolvers = [];
-let persistRetryTimer = null;
-let persistRetryAttempt = 0;
-let persistenceDirty = false;
-let pendingServerWrites = 0;
-let persistenceGeneration = 0;
-let lastSuccessfulSyncAt = 0;
+
+function updateUndoButton(){
+    try { undoButton.disabled = !syncClient?.view || !syncClient.history().length; }
+    catch { undoButton.disabled = true; }
+}
 
 function setSyncStatus(state, detail = ''){
+    if(localPreviewMode) state = 'local';
     if(!syncStatus || !syncStatusLabel) return;
-    const labels = {
-        loading:'Connexion…',
-        saving:'Sauvegarde…',
-        saved:'Sauvegardé',
-        offline:'Hors ligne',
-        error:'Erreur sync',
-        local:'Aperçu local'
-    };
-    const label = labels[state] || labels.loading;
+    const labels = { loading:'Connexion…', saving:'Sauvegarde…', saved:'Sauvegardé',
+        offline:'Hors ligne', error:'Erreur sync', local:'Aperçu local', conflict:'À vérifier' };
     syncStatus.dataset.state = state;
-    syncStatusLabel.textContent = label;
-    const savedTime = lastSuccessfulSyncAt
-        ? ` Dernière sauvegarde : ${new Date(lastSuccessfulSyncAt).toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit', second:'2-digit' })}.`
-        : '';
-    syncStatus.title = detail || `${label}.${savedTime}`;
+    syncStatusLabel.textContent = labels[state] || labels.loading;
+    const descriptions = {
+        saved:'Toutes les modifications ont été confirmées par le serveur.',
+        saving:'Changements enregistrés sur cet appareil, en attente du serveur.',
+        offline:'Hors ligne. Les changements seront envoyés automatiquement à la reconnexion.',
+        error:'Synchronisation interrompue. Les changements restent sur cet appareil et seront retentés.',
+        loading:'Vérification de la version serveur…',
+        conflict:'Des modifications concurrentes ont été conservées pour récupération. Cliquer pour les exporter.'
+    };
+    syncStatus.title = typeof detail === 'string' && detail ? detail : descriptions[state] || labels[state];
     syncStatus.setAttribute('aria-label', syncStatus.title);
+    updateUndoButton();
 }
 
 function cancelScheduledPersistence(){
@@ -2173,115 +2178,79 @@ function cancelScheduledPersistence(){
     persistTimer = null;
 }
 
-function schedulePersistenceFlush(delay){
+function schedulePersistenceFlush(delay = 120){
     cancelScheduledPersistence();
-    persistTimer = window.setTimeout(() => {
-        persistTimer = null;
-        flushPersistence();
-    }, Math.max(0, delay));
-}
-
-function schedulePersistenceRetry(){
-    clearTimeout(persistRetryTimer);
-    const delay = Math.min(30000, 1000 * (2 ** Math.min(persistRetryAttempt++, 5)));
-    persistRetryTimer = window.setTimeout(() => {
-        persistRetryTimer = null;
-        if(!navigator.onLine){
-            setSyncStatus('offline', 'Hors ligne. Les changements seront renvoyés automatiquement.');
-            return;
-        }
-        flushPersistence();
-    }, delay);
+    persistTimer = window.setTimeout(flushPersistence, Math.max(0, delay));
 }
 
 function resetScheduledPersistence(){
     cancelScheduledPersistence();
-    clearTimeout(persistRetryTimer);
-    persistRetryTimer = null;
-    persistRetryAttempt = 0;
-    persistenceDirty = false;
-    pendingServerWrites = 0;
-    persistenceGeneration++;
-    const cancelledResolvers = persistResolvers.splice(0);
-    cancelledResolvers.forEach(done => done(false));
+    syncClient?.stop();
+    syncClient = null;
+    updateUndoButton();
 }
 
-async function flushPersistence(){
+function flushPersistence(){
     cancelScheduledPersistence();
-    if(!persistenceDirty && !persistResolvers.length) return true;
-    if(!docRef){
-        persistenceDirty = true;
-        setSyncStatus(navigator.onLine ? 'loading' : 'offline');
-        return false;
-    }
-    const generation = persistenceGeneration;
-    const batchResolvers = persistResolvers.splice(0);
-    persistenceDirty = false;
-    data._rev = (data._rev || 0) + 1;
-    data._lastWriteId = `${clientSyncId}:${Date.now()}:${++localWriteSequence}`;
-    const payload = { ...exportableData(data), _rev:data._rev, _lastWriteId:data._lastWriteId };
-    pendingServerWrites++;
-    let writeFailed = false;
-    const writeWatchdog = window.setTimeout(() => {
-        if(generation !== persistenceGeneration) return;
-        setSyncStatus(navigator.onLine ? 'error' : 'offline', navigator.onLine
-            ? 'La sauvegarde prend anormalement longtemps. Firebase poursuit la reconnexion automatiquement.'
-            : 'Hors ligne. La sauvegarde reprendra automatiquement avec le réseau.');
-        if(!unsubSnap) ensureRealtimeSubscription();
-    }, 15000);
-    setSyncStatus(navigator.onLine ? 'saving' : 'offline', navigator.onLine
-        ? 'Sauvegarde Firebase en cours…'
-        : 'Hors ligne. La modification est conservée localement par Firebase.');
+    return syncClient?.flush() || Promise.resolve(false);
+}
+
+// Capture only this action's delta, synchronously, before the browser can freeze.
+// Network debounce never delays the durable local journal.
+function persistDebounced(delay = 120, options = {}){
     try {
-        await setDoc(docRef, payload);
-        if(generation !== persistenceGeneration) return false;
-        persistRetryAttempt = 0;
-        lastSuccessfulSyncAt = Date.now();
-        batchResolvers.forEach(done => done(true));
-        return true;
+        if(!syncClient) throw new Error('sync-not-ready');
+        syncClient.record(data, options);
+        updateUndoButton();
+        schedulePersistenceFlush(delay);
+        return Promise.resolve(true);
     } catch(error){
-        if(generation !== persistenceGeneration) return false;
-        writeFailed = true;
-        console.error('persist error', error);
-        persistenceDirty = true;
-        batchResolvers.forEach(done => done(false));
-        if(navigator.onLine){
-            setSyncStatus('error', 'Échec de la sauvegarde. Nouvelle tentative automatique en cours.');
-            schedulePersistenceRetry();
-        } else {
-            setSyncStatus('offline', 'Hors ligne. Nouvelle tentative automatique dès le retour du réseau.');
+        console.error('local persistence error', error);
+        if(syncClient?.view){
+            data = normalizeData(syncClient.view);
+            clearAllCaches();
+            renderVisibleDataAfterFullChange({ remote:true });
         }
-        showToast('Synchronisation interrompue. Nouvelle tentative automatique.', 'error');
-        return false;
-    } finally {
-        clearTimeout(writeWatchdog);
-        if(generation !== persistenceGeneration) return;
-        pendingServerWrites = Math.max(0, pendingServerWrites - 1);
-        if(!writeFailed && (persistenceDirty || persistResolvers.length)){
-            schedulePersistenceFlush(0);
-        } else if(!writeFailed && pendingServerWrites === 0 && lastSuccessfulSyncAt){
-            setSyncStatus('saved');
-        }
+        setSyncStatus('error', 'Le changement n’a pas pu être conservé localement. Libère de l’espace puis réessaie.');
+        showToast('Modification non enregistrée : stockage local indisponible.', 'error');
+        return Promise.resolve(false);
     }
 }
 
-const persistDebounced = (delay = 120) => new Promise(resolve => {
-    if(localPreviewMode){
-        setSyncStatus('local', 'Aperçu local : aucune donnée n’est envoyée à Firebase.');
-        resolve(true);
-        return;
+undoButton.onclick = () => {
+    try {
+        if(syncClient?.undo()){
+            updateUndoButton();
+            schedulePersistenceFlush(0);
+            showToast('Dernière modification annulée.');
+        }
+    } catch(error){
+        console.error('undo error', error);
+        setSyncStatus('error', 'Impossible de conserver l’annulation. Réessaie après avoir libéré de l’espace.');
     }
-    persistenceDirty = true;
-    persistResolvers.push(resolve);
-    setSyncStatus(navigator.onLine ? 'saving' : 'offline', navigator.onLine
-        ? 'Modification en attente de sauvegarde…'
-        : 'Hors ligne. La modification sera envoyée automatiquement.');
-    schedulePersistenceFlush(delay);
+};
+document.addEventListener('keydown', event => {
+    if(!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return;
+    if(event.target.closest?.('input, textarea, [contenteditable="true"]') || undoButton.disabled) return;
+    event.preventDefault();
+    undoButton.click();
+});
+syncStatus.addEventListener('click', () => {
+    const conflicts = syncClient?.read('conflicts');
+    if(!conflicts?.length){ flushPersistence(); return; }
+    const blob = new Blob([JSON.stringify({ format:'HBTRK_SYNC_RECOVERY', conflicts }, null, 2)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'HBTRK-modifications-en-conflit.json';
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
 let taskRolloverTimer = null;
 
 async function processTaskRollovers(){
+    if(!syncClient?.view) return 0;
     const created = rollForwardLaterTasks();
     if(!created) return 0;
     if(focusedDateKey && !dayPage.classList.contains('hidden') && mobileDayMode === 'tasks'){
@@ -2291,7 +2260,7 @@ async function processTaskRollovers(){
         const [year, month] = expandedMonthKey.split('-').map(Number);
         rerenderTaskViews(formatDateKey(new Date(year, month, 1)), { month:true });
     }
-    persistDebounced();
+    persistDebounced(0, { undoable:false });
     return created;
 }
 
@@ -2312,22 +2281,32 @@ document.addEventListener('visibilitychange', () => {
     }
     processTaskRollovers();
     ensureRealtimeSubscription();
-    if(persistenceDirty || persistResolvers.length) flushPersistence();
+    flushPersistence();
 });
 window.addEventListener('pagehide', () => { flushPersistence(); });
 window.addEventListener('pageshow', () => {
     ensureRealtimeSubscription();
-    if(persistenceDirty || persistResolvers.length) flushPersistence();
+    flushPersistence();
 });
 window.addEventListener('online', () => {
-    setSyncStatus(persistenceDirty || pendingServerWrites ? 'saving' : 'loading', 'Connexion retrouvée. Vérification Firebase…');
+    setSyncStatus('loading', 'Connexion retrouvée. Vérification du serveur…');
     ensureRealtimeSubscription();
-    if(persistenceDirty || persistResolvers.length) flushPersistence();
+    flushPersistence();
 });
 window.addEventListener('offline', () => {
     if(currentUser) setSyncStatus('offline', 'Hors ligne. Les changements sont conservés localement et seront synchronisés automatiquement.');
 });
 document.addEventListener('freeze', () => { flushPersistence(); });
+window.addEventListener('storage', event => {
+    if(!syncClient || !event.key?.startsWith(syncClient.prefix)) return;
+    try {
+        const cached = syncClient.read('cache');
+        if(cached) syncClient.receive(cached, false);
+        else syncClient.rebase();
+        flushPersistence();
+    }
+    catch(error){ console.error('local journal error', error); setSyncStatus('error'); }
+});
 
 function syncHabitToggleButtonState(btn, h, dateKey, opts = {}){
     const { isCompactMonth = false } = opts;
@@ -2411,6 +2390,8 @@ async function renameHabit(habit, onChanged){
         confirmLabel:'Enregistrer'
     });
     if(proposed === null) return false;
+    habit = data.habits.find(current => current.id === habit.id);
+    if(!habit){ showToast('Cette habitude a été supprimée sur un autre appareil.', 'error'); return false; }
     const newName = proposed.trim().replace(/\s+/g, ' ');
     if(!newName || newName === habit.name) return false;
     if(findHabitNameConflict(newName, habit)){
@@ -3474,7 +3455,6 @@ bindOverlayClose(modalInstall, ()=>{ modalInstall.classList.add('hidden'); modal
 let app, db, docRef, unsubSnap, auth, currentUser;
 let snapshotRetryTimer = null;
 let snapshotRetryAttempt = 0;
-let lastAppliedSnapshotSignature = '';
 
 const authModal   = document.getElementById('authModal');
 const authForm    = document.getElementById('authForm');
@@ -3767,137 +3747,143 @@ function scheduleRealtimeReconnect(){
     }, delay);
 }
 
-function snapshotSignature(server){
-    return `${Number(server?._rev) || 0}|${String(server?._lastWriteId || '')}`;
-}
-
-function applyRealtimeSnapshot(snap){
-    const fromServer = !snap.metadata.fromCache;
-    if(!navigator.onLine){
-        setSyncStatus('offline', 'Hors ligne. Affichage des données conservées sur cet appareil.');
-    } else if(!fromServer){
-        setSyncStatus(persistenceDirty || pendingServerWrites ? 'saving' : 'loading', 'Vérification des données Firebase…');
-    } else if(!persistenceDirty && pendingServerWrites === 0){
-        lastSuccessfulSyncAt = Date.now();
-        setSyncStatus('saved');
-    }
-
-    if(snap.exists()){
-        const server = snap.data();
-        const signature = snapshotSignature(server);
-        if(initialSynced && (snap.metadata.hasPendingWrites || persistenceDirty || pendingServerWrites > 0)) return;
-        const isOwnWriteAcknowledgement = initialSynced
-            && typeof server?._lastWriteId === 'string'
-            && server._lastWriteId.startsWith(`${clientSyncId}:`);
-        if(isOwnWriteAcknowledgement){
-            lastAppliedSnapshotSignature = signature;
-            return;
-        }
-        if(initialSynced && signature === lastAppliedSnapshotSignature) return;
-        lastAppliedSnapshotSignature = signature;
-        data = normalizeData(server);
-        const carriedTaskCount = rollForwardLaterTasks();
-        const migratedTaskGroups = Array.isArray(server.tasks) && server.tasks.some(task => task?.groupBreakBefore === true);
-        const serverRolloverTasks = Array.isArray(server.tasks) ? server.tasks.filter(task => task?.rolloverFromId) : [];
-        const normalizedRolloverTasks = data.tasks.filter(task => task?.rolloverFromId);
-        const savedRolloverSkips = normalizeTaskRolloverSkips(server.taskRolloverSkips);
-        const inferredRolloverSkips = Object.entries(data.taskRolloverSkips || {}).some(([dateKey, rootIds]) =>
-            rootIds.some(rootId => !savedRolloverSkips[dateKey]?.includes(rootId))
-        );
-        const migratedTaskRollovers = serverRolloverTasks.length !== normalizedRolloverTasks.length
-            || serverRolloverTasks.some(task => !task.rolloverRootId)
-            || inferredRolloverSkips;
-        if(carriedTaskCount || migratedTaskGroups || migratedTaskRollovers) persistDebounced(0);
-        clearAllCaches();
-    } else {
-        data = { habits:[], tasks:[], taskRolloverSkips:{}, dayColors:{}, completions:{}, _rev:0 };
-        lastAppliedSnapshotSignature = '';
-        persistDebounced(0);
-    }
-
+function receiveSyncedView(value){
+    const next = normalizeData(value);
+    const changed = !equal(exportableData(data), exportableData(next));
+    if(initialSynced && !changed){ data._rev = next._rev; updateUndoButton(); return; }
+    data = next;
+    updateUndoButton();
     if(!initialSynced){
+        clearAllCaches();
+        initialSynced = true;
         renderYears();
         router();
-        initialSynced = true;
-    } else {
+    } else if(changed){
+        clearAllCaches();
         renderVisibleDataAfterFullChange({ remote:true });
     }
 }
 
+function createSyncClient(uid, send, storage = window.localStorage){
+    return new SyncClient({
+        uid, storage, send, normalize:normalizeData, online:() => localPreviewMode || navigator.onLine,
+        onView:receiveSyncedView,
+        onStatus:(state, error) => {
+            if(error instanceof Error) console.error('sync error', error);
+            setSyncStatus(state, typeof error === 'string' ? error : '');
+        },
+        onConflict:() => {
+            setSyncStatus('conflict');
+            showToast('Modification concurrente détectée : la version serveur est conservée. Clique sur « À vérifier » pour récupérer la modification locale.', 'error');
+        }
+    });
+}
+
+async function initializeSyncDocument(target, legacy){
+    return initializeDocument({ run:callback => runTransaction(db, callback), target, legacy,
+        marker:doc(db, 'users', currentUser.uid, 'data', 'sync-v3-migration'), normalize:normalizeData });
+}
+
+function applyRealtimeSnapshot(snap){
+    if(!syncClient) return;
+    if(snap.metadata.fromCache || snap.metadata.hasPendingWrites){
+        // Our own verified cache/outbox handles offline use. Never seed or
+        // overwrite anything from an unconfirmed Firestore cache snapshot.
+        syncClient.status();
+        return;
+    }
+    if(!snap.exists()){
+        if(initialSynced){
+            setSyncStatus('error', 'Les données serveur sont indisponibles. La copie locale est conservée.');
+        }
+        return;
+    }
+    if(snap.data()._syncVersion !== SYNC_VERSION){
+        setSyncStatus('error', 'Une mise à jour de HBTRK est nécessaire.');
+        return;
+    }
+    syncClient.receive(snap.data(), true);
+    schedulePersistenceFlush(0);
+    processTaskRollovers();
+}
+
 function ensureRealtimeSubscription(){
     if(!currentUser || !docRef || unsubSnap) return;
-    const subscribedRef = docRef;
+    const subscribedRef = docRef, legacy = doc(db, 'users', currentUser.uid, 'data', 'fourpill');
+    initializeSyncDocument(subscribedRef, legacy).then(value => {
+        if(docRef !== subscribedRef || !syncClient) return;
+        syncClient.receive(value, true);
+        processTaskRollovers();
+        flushPersistence();
+    }).catch(error => {
+        if(docRef !== subscribedRef) return;
+        console.error('sync initialization error', error);
+        setSyncStatus(navigator.onLine ? 'error' : 'offline');
+        // Keep a retry path even when the listener itself stays open.
+        clearTimeout(snapshotRetryTimer);
+        snapshotRetryTimer = setTimeout(() => {
+            clearRealtimeSubscription();
+            ensureRealtimeSubscription();
+        }, 15000);
+    });
     unsubSnap = onSnapshot(subscribedRef, { includeMetadataChanges:true }, snap => {
         if(docRef !== subscribedRef) return;
         snapshotRetryAttempt = 0;
-        applyRealtimeSnapshot(snap);
+        try { applyRealtimeSnapshot(snap); }
+        catch(error){ console.error('snapshot error', error); setSyncStatus('error'); }
     }, error => {
         if(docRef !== subscribedRef) return;
         console.error('onSnapshot error', error);
         unsubSnap = null;
-        setSyncStatus(navigator.onLine ? 'error' : 'offline', navigator.onLine
-            ? 'Connexion Firebase interrompue. Reconnexion automatique en cours.'
-            : 'Hors ligne. Reconnexion automatique dès le retour du réseau.');
-        if(!initialSynced){
-            homePage.innerHTML = '<div class="compact-empty"><strong>Synchronisation momentanément indisponible.</strong><br>Reconnexion automatique en cours…</div>';
-        }
+        setSyncStatus(navigator.onLine ? 'error' : 'offline');
         scheduleRealtimeReconnect();
     });
 }
 
 async function initFirebaseAll(){
     await loadFirebaseSdk();
-    // initialise Firebase app
-    app  = initializeApp(firebaseConfig);
-
-    // initialise Firestore AVEC cache persistant moderne (remplace enableIndexedDbPersistence)
-    try {
-        db = initializeFirestore(app, {
-            localCache: persistentLocalCache({
-                tabManager: persistentMultipleTabManager()
-            })
-        });
-    } catch(error){
-        console.warn('persistent cache unavailable', error);
-        db = getFirestore(app);
-    }
-
-    // auth
+    app = initializeApp(firebaseConfig);
+    // The durable queue is now explicit and transactional. Do not reopen the
+    // old SDK queue containing unconditional full-document writes.
+    db = initializeFirestore(app, { localCache:memoryLocalCache() });
     auth = getAuth(app);
-
-    // on garde ta persistance login dans le navigateur
-    try {
-        await setPersistence(auth, browserLocalPersistence);
-    } catch(error){
-        console.warn('auth persistence unavailable', error);
-    }
-
-    onAuthStateChanged(auth, async (user)=>{
+    await setPersistence(auth, browserLocalPersistence);
+    onAuthStateChanged(auth, user => {
         const previousUserId = currentUser?.uid || null;
         const nextUserId = user?.uid || null;
-        clearRealtimeSubscription();
-        if(previousUserId !== nextUserId){
-            resetScheduledPersistence();
-            initialSynced = false;
-            focusedDateKey = null;
-            docRef = null;
-            lastAppliedSnapshotSignature = '';
-            data = { habits: [], tasks: [], taskRolloverSkips: {}, dayColors: {}, completions: {}, _rev: 0 };
-            clearAllCaches();
-        }
-        currentUser = user || null;
-
-        if(!currentUser){
-            setAuthedUI(false);
-            setSyncStatus('loading');
+        if(previousUserId === nextUserId && currentUser){
+            currentUser = user;
+            ensureRealtimeSubscription();
             return;
         }
-
+        clearRealtimeSubscription();
+        resetScheduledPersistence();
+        initialSynced = false;
+        focusedDateKey = null;
+        docRef = null;
+        data = normalizeData({});
+        clearAllCaches();
+        currentUser = user || null;
+        if(!currentUser){ setAuthedUI(false); return; }
         setAuthedUI(true);
         setSyncStatus(navigator.onLine ? 'loading' : 'offline');
         homePage.innerHTML = '<div class="py-24 text-center text-sm text-white/50">Synchronisation de votre calendrier…</div>';
-        docRef = doc(db, 'users', currentUser.uid, 'data', 'fourpill');
-        ensureRealtimeSubscription();
+        const uid = currentUser.uid;
+        const target = doc(db, 'users', uid, 'data', SYNC_DOCUMENT);
+        docRef = target;
+        try {
+            syncClient = createSyncClient(uid, batch => commitBatch({
+                run:callback => runTransaction(db, callback),
+                target, receipt:doc(db, 'users', uid, 'data', 'sync-v3-' + batch.stream),
+                batch, normalize:normalizeData
+            }));
+            updateUndoButton();
+            ensureRealtimeSubscription();
+        } catch(error){
+            console.error('local journal unavailable', error);
+            setSyncStatus('error', 'Le stockage local est indisponible. Aucune donnée serveur n’a été remplacée.');
+            homePage.textContent = 'Impossible d’ouvrir le stockage local. Vérifie l’espace disponible puis recharge HBTRK.';
+        }
     });
 }
 
@@ -3964,7 +3950,7 @@ function buildLocalPreviewData(){
 
 function initLocalPreview(){
     localPreviewMode = true;
-    data = buildLocalPreviewData();
+    data = normalizeData(buildLocalPreviewData());
     rollForwardLaterTasks();
     clearAllCaches();
     setAuthedUI(true);
@@ -3976,6 +3962,19 @@ function initLocalPreview(){
     renderYears();
     router();
     initialSynced = true;
+    // In-memory adapter for preview only; production always uses transactions.
+    let previewServer = { ...data, _rev:1 };
+    const values = new Map();
+    const storage = { get length(){return values.size;}, key:i => [...values.keys()][i],
+        getItem:key => values.get(key) ?? null, setItem:(key,value) => values.set(key,value), removeItem:key => values.delete(key) };
+    syncClient = createSyncClient('preview', async batch => {
+        const { applyChanges } = await import('./src/sync-model.mjs');
+        const result = applyChanges(previewServer, batch.changes);
+        previewServer = { ...result.data, _rev:previewServer._rev + 1 };
+        return { ...result, data:previewServer };
+    }, storage);
+    syncClient.receive(previewServer, true);
+    updateUndoButton();
 }
 
 (async function initApp(){
