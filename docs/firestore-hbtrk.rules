@@ -1,45 +1,52 @@
-// FRAGMENT : à insérer DANS match /databases/{database}/documents.
-// Ne remplace pas les autres règles de ton projet.
-// Vérifier que le projet sélectionné dans Firebase est habit-8d57f.
-match /users/{userId}/data/{documentId} {
-  function isHbtrkOwner() {
-    return request.auth != null && request.auth.uid == userId;
+// Fichier COMPLET pour HBTRK, projet habit-8d57f.
+// Remplace les anciennes règles limitées à docId == "fourpill".
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{userId}/data/{documentId} {
+      function isHbtrkOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      function isSyncReceipt() {
+        return documentId.matches('sync-v3-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}');
+      }
+
+      // Lecture autorisée même si le document n'existe pas encore : nécessaire
+      // aux transactions de migration et à la création du premier reçu.
+      allow get: if isHbtrkOwner() && (
+        documentId == 'fourpill'
+        || documentId == 'fourpill-v3'
+        || documentId == 'sync-v3-migration'
+        || isSyncReceipt()
+      );
+
+      allow create, update: if isHbtrkOwner() && (
+        (documentId == 'fourpill-v3'
+          && request.resource.data._syncVersion == 3
+          && request.resource.data._rev is int
+          && request.resource.data._rev > 0
+          && request.resource.data.habits is list
+          && request.resource.data.tasks is list
+          && request.resource.data.completions is map
+          && request.resource.data.dayColors is map
+          && request.resource.data.taskRolloverSkips is map)
+        || (isSyncReceipt()
+          && request.resource.data.keys().hasOnly(['sequence', 'conflicts'])
+          && request.resource.data.sequence is int
+          && request.resource.data.sequence > 0
+          && request.resource.data.conflicts is list)
+      );
+
+      allow create: if isHbtrkOwner()
+        && documentId == 'sync-v3-migration'
+        && request.resource.data.keys().hasOnly(['version'])
+        && request.resource.data.version == 3;
+
+      // Aucun write sur fourpill : une ancienne page ne peut plus écraser
+      // la source de migration. Recharger les anciens clients après publication.
+      // Aucune suppression de documents ni exploration de la collection.
+      allow delete, list: if false;
+    }
   }
-
-  function isSyncReceipt() {
-    return documentId.matches('sync-v3-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}');
-  }
-
-  // La migration lit l'ancien calendrier mais ne le remplace jamais.
-  allow get: if isHbtrkOwner() && (
-    documentId == 'fourpill'
-    || documentId == 'fourpill-v3'
-    || documentId == 'sync-v3-migration'
-    || isSyncReceipt()
-  );
-
-  allow create, update: if isHbtrkOwner() && (
-    (documentId == 'fourpill-v3'
-      && request.resource.data._syncVersion == 3
-      && request.resource.data._rev is int
-      && request.resource.data._rev > 0
-      && request.resource.data.habits is list
-      && request.resource.data.tasks is list
-      && request.resource.data.completions is map
-      && request.resource.data.dayColors is map
-      && request.resource.data.taskRolloverSkips is map)
-    || (isSyncReceipt()
-      && request.resource.data.keys().hasOnly(['sequence', 'conflicts'])
-      && request.resource.data.sequence is int
-      && request.resource.data.sequence > 0
-      && request.resource.data.conflicts is list)
-  );
-
-  allow create: if isHbtrkOwner()
-    && documentId == 'sync-v3-migration'
-    && request.resource.data.keys().hasOnly(['version'])
-    && request.resource.data.version == 3;
-
-  // HBTRK met à jour le contenu du calendrier ; il ne supprime pas ces documents.
-  allow delete, list: if false;
 }

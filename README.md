@@ -31,7 +31,7 @@ Cette commande valide le JavaScript, exécute les tests de synchronisation et re
 
 Les habitudes, tâches, couleurs et complétions sont synchronisées avec Firebase pour l’utilisateur connecté. Le menu permet aussi d’exporter ou d’importer une sauvegarde JSON HBTRK.
 
-## Synchronisation v3 — migration à vérifier avant publication
+## Synchronisation v3
 
 La sauvegarde précédente envoyait l'intégralité de l'état local avec `setDoc`. Une page en retard pouvait donc remplacer les ajouts/validations d'un autre appareil. Les snapshots distants étaient aussi ignorés pendant certaines sauvegardes locales. Il ne suffisait pas de raccourcir le délai d'envoi.
 
@@ -55,15 +55,26 @@ Tous les documents restent sous `users/{uid}/data/` et ne doivent être accessib
 | `sync-v3-migration` | Marqueur de migration, lecture et création transactionnelle. |
 | `sync-v3-{identifiant}` | Reçu d'opérations, lecture et écriture transactionnelle. |
 
-Le [fragment HBTRK](docs/firestore-hbtrk.rules) ajoute uniquement les autorisations nécessaires au propriétaire de ces documents. Il doit être inséré **dans** `match /databases/{database}/documents` des règles du projet **`habit-8d57f`**, en conservant les autres blocs. Ce n'est pas un fichier de règles complet à publier seul. Il n'accorde aucun accès aux données d'un autre utilisateur et n'ajoute pas d'accès administrateur aux habitudes/tâches.
+Le [fichier complet de règles HBTRK](docs/firestore-hbtrk.rules) remplace les anciennes règles du projet **`habit-8d57f`**. Il contient déjà `rules_version`, `service cloud.firestore` et tous les blocs nécessaires : copier **tout le fichier**, sans l'insérer dans les anciennes règles. Il autorise uniquement le propriétaire des documents, jamais un autre utilisateur ni un visiteur non connecté.
 
-Les règles fournies dans la conversation le 9 septembre ne contiennent aucun bloc `users/{uid}/data` : elles refuseraient aussi la lecture de l'ancien document `fourpill`. Vérifier qu'elles viennent bien de ce projet, et non de l'application de planning qui utilise les collections `employees`, `schedules` et `organizations`. Le compte connecté à la CLI a reçu un refus HTTP 403 lors de la lecture des règles du projet `habit-8d57f` : le fragment n'a pas été publié ni validé contre les règles réellement déployées.
+La cause du blocage à la connexion a été confirmée avec les bonnes règles : la condition `docId == "fourpill"` refuse la lecture de `fourpill-v3` et empêche la transaction de migration, ainsi que les reçus nécessaires aux sauvegardes. La configuration fournie correspond au bon projet. Changer la clé API, installer un SDK plus récent ou recharger automatiquement la page ne corrige pas ce refus d'accès.
 
-Dans Firebase → Firestore Database → Règles, insérer le fragment, vérifier sa compilation et publier. Un `acp` / déploiement Netlify **ne publie pas les règles Firestore**. Le document historique reste en lecture seule pour le nouveau client ; les éventuelles autorisations présentes dans d'autres blocs sont inchangées (les règles Firestore sont additives).
+### Publier les règles (nécessaire pour rétablir la synchronisation)
+
+Dans Firebase → projet `habit-8d57f` → Firestore Database → Règles, remplacer le contenu par le fichier complet puis **Publier**. Le fichier `firebase.json` permet aussi un déploiement limité aux règles, sans modifier l'hébergement Netlify :
+
+```powershell
+firebase login:add
+npm run deploy:rules -- --account upsylone.gravit@gmail.com
+```
+
+Utiliser un compte disposant des droits de publication sur `habit-8d57f` ; l'adresse ci-dessus est celle associée au projet dans la configuration fournie, mais ce paramètre public ne garantit pas ses droits administrateur. Le compte CLI `naim.benkherouf@gmail.com` a reçu un refus HTTP 403. Les fichiers du dépôt ne changent pas les règles en ligne à eux seuls : un `acp` / déploiement Netlify **ne publie pas les règles Firestore**.
+
+Après publication, utiliser « Réessayer » dans HBTRK, ou recharger les pages PC et téléphone **sans effacer les données du site**. Les tentatives de reconnexion automatiques utilisent les nouvelles règles dès leur propagation. Le premier accès migre les données serveur existantes vers v3, sans remplacer le document historique par un cache local.
 
 Une erreur de permission conserve le journal local et affiche maintenant une explication visible avec un bouton Réessayer. Elle ne déclenche jamais de retour à une sauvegarde complète non protégée. Sans première lecture réussie ni cache vérifié, Home/Day restent sur un état de connexion explicite et l'ajout/import/export sont désactivés, plutôt que d'afficher ou exporter un faux calendrier vide. Une copie locale existante reste utilisable et exportable.
 
-La migration lit la version serveur dans une transaction, une seule fois, et conserve l'ancien document. Une migration déjà effectuée n'est pas rejouée si le nouveau document disparaît. Les anciennes pages encore ouvertes peuvent toujours écrire dans `fourpill`, mais ne peuvent pas remplacer `fourpill-v3`. Leurs modifications ultérieures ne sont **pas** fusionnées automatiquement : recharger tous les appareils lors de la mise à jour.
+La migration lit la version serveur dans une transaction, une seule fois, et conserve l'ancien document. Une migration déjà effectuée n'est pas rejouée si le nouveau document disparaît. Les nouvelles règles interdisent aussi les écritures sur l'ancien `fourpill` pour qu'une vieille page ne puisse plus écraser la source de migration. Les anciennes pages encore ouvertes doivent donc être rechargées. Leurs changements restés uniquement dans l'ancien cache ne sont **pas** fusionnés automatiquement.
 
 Avant cette première mise à jour, exporter une sauvegarde depuis chaque appareil contenant des changements à garder. L'ancien cache IndexedDB n'est ni effacé ni rejoué automatiquement, car il pourrait contenir des écritures complètes périmées. Les données déjà écrasées avant le correctif ne sont récupérables que depuis un export, une autre copie intacte ou une sauvegarde serveur existante. Revenir à un ancien déploiement ne constitue pas un rollback des données v3.
 
@@ -76,6 +87,14 @@ Le bouton ↶ du header (ou Ctrl/Cmd + Z hors des champs de saisie) annule la de
 ### Validation
 
 `npm test` couvre les transactions concurrentes, un téléphone en retard, les modifications hors ligne, les fermetures/réouvertures, les accusés perdus, plusieurs onglets, les conflits, les reports, l'archivage, les imports/exports et l'annulation. Le banc de tests simule les réessais de transaction avec le même code de fusion que l'application ; ce n'est pas un test de l'émulateur ni du projet Firebase réel.
+
+Pour vérifier réellement la compilation et l'application des règles avec l'émulateur officiel Firestore (Java 21+ et Firebase CLI nécessaires) :
+
+```powershell
+npm run test:rules
+```
+
+Ces tests utilisent exclusivement `127.0.0.1` et le projet fictif `demo-hbtrk`, sans compte Firebase ni données réelles. Ils reproduisent le refus des anciennes règles, vérifient la migration avec les fonctions de production, puis les modifications PC/téléphone, les reçus anti-rejeu, les nouveaux comptes, la protection de l'ancien document et le refus des accès non autorisés. Le test ne peut pas cibler le serveur de production.
 
 Après validation des règles et déploiement, vérifier avec un compte de test sur deux appareils : laisser le téléphone ouvert, ajouter/cocher sur PC, modifier un autre élément sur téléphone ; les deux résultats doivent rester présents. Refaire avec le téléphone hors ligne puis reconnecté, et avec un onglet fermé juste après une modification. Attendre « Sauvegardé » et recharger les deux côtés pour confirmer la persistance serveur.
 

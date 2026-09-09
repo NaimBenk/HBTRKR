@@ -7,6 +7,8 @@
     "dev": "node scripts/serve.mjs",
     "check": "node --check app.js && npm test && npm run build:css",
     "test": "node --test scripts/*.test.mjs",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-hbtrk \"node --test scripts/firestore-rules.emulator.mjs\"",
+    "deploy:rules": "firebase deploy --only firestore:rules --project habit-8d57f",
     "build:css": "npx @tailwindcss/cli -i ./src/input.css -o ./dist/style.css --minify"
   },
   "repository": {
