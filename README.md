@@ -55,7 +55,13 @@ Tous les documents restent sous `users/{uid}/data/` et ne doivent être accessib
 | `sync-v3-migration` | Marqueur de migration, lecture et création transactionnelle. |
 | `sync-v3-{identifiant}` | Reçu d'opérations, lecture et écriture transactionnelle. |
 
-Les règles déployées ne sont pas dans ce dépôt : **vérifier ces autorisations avant déploiement**, sans ouvrir l'accès à d'autres utilisateurs ni remplacer aveuglément les règles existantes. Une règle limitée au seul document `fourpill` nécessitera une adaptation. Une erreur de permission conserve le journal local et ne déclenche jamais de retour à une sauvegarde complète non protégée.
+Le [fragment HBTRK](docs/firestore-hbtrk.rules) ajoute uniquement les autorisations nécessaires au propriétaire de ces documents. Il doit être inséré **dans** `match /databases/{database}/documents` des règles du projet **`habit-8d57f`**, en conservant les autres blocs. Ce n'est pas un fichier de règles complet à publier seul. Il n'accorde aucun accès aux données d'un autre utilisateur et n'ajoute pas d'accès administrateur aux habitudes/tâches.
+
+Les règles fournies dans la conversation le 9 septembre ne contiennent aucun bloc `users/{uid}/data` : elles refuseraient aussi la lecture de l'ancien document `fourpill`. Vérifier qu'elles viennent bien de ce projet, et non de l'application de planning qui utilise les collections `employees`, `schedules` et `organizations`. Le compte connecté à la CLI a reçu un refus HTTP 403 lors de la lecture des règles du projet `habit-8d57f` : le fragment n'a pas été publié ni validé contre les règles réellement déployées.
+
+Dans Firebase → Firestore Database → Règles, insérer le fragment, vérifier sa compilation et publier. Un `acp` / déploiement Netlify **ne publie pas les règles Firestore**. Le document historique reste en lecture seule pour le nouveau client ; les éventuelles autorisations présentes dans d'autres blocs sont inchangées (les règles Firestore sont additives).
+
+Une erreur de permission conserve le journal local et affiche maintenant une explication visible avec un bouton Réessayer. Elle ne déclenche jamais de retour à une sauvegarde complète non protégée. Sans première lecture réussie ni cache vérifié, Home/Day restent sur un état de connexion explicite et l'ajout/import/export sont désactivés, plutôt que d'afficher ou exporter un faux calendrier vide. Une copie locale existante reste utilisable et exportable.
 
 La migration lit la version serveur dans une transaction, une seule fois, et conserve l'ancien document. Une migration déjà effectuée n'est pas rejouée si le nouveau document disparaît. Les anciennes pages encore ouvertes peuvent toujours écrire dans `fourpill`, mais ne peuvent pas remplacer `fourpill-v3`. Leurs modifications ultérieures ne sont **pas** fusionnées automatiquement : recharger tous les appareils lors de la mise à jour.
 

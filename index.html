@@ -22,7 +22,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#080808">
   
-  <link rel="stylesheet" href="./dist/style.css?v=20260907-1">
+  <link rel="stylesheet" href="./dist/style.css?v=20260909-2">
 
   <style>
     :root{
@@ -262,6 +262,12 @@ button:focus-visible, input:focus-visible, a:focus-visible {
 .sync-status[data-state="error"] .sync-status-dot { background:#f05252; box-shadow:0 0 0 3px rgba(240,82,82,.08); }
 .sync-status[data-state="conflict"] { color:#ffd7b8; border-color:var(--orange); cursor:pointer; }
 .sync-status[data-state="conflict"] .sync-status-dot { background:var(--orange); }
+.sync-notice { position:fixed; z-index:45; top:calc(4.6rem + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); width:min(34rem,calc(100% - 2rem)); padding:1rem; border:1px solid rgba(240,82,82,.35); border-radius:1rem; background:rgba(24,14,17,.97); color:#fff; box-shadow:0 10px 30px rgba(0,0,0,.3); font-size:.8rem; }
+.sync-notice[hidden] { display:none; }
+.sync-notice p { margin:.45rem 0 .7rem; line-height:1.5; color:rgba(255,255,255,.8); }
+.sync-placeholder { max-width:32rem; margin:12rem auto 2rem; padding:1rem; text-align:center; }
+.sync-placeholder h1 { font-size:1.05rem; font-weight:750; }
+.sync-placeholder p { margin-top:.75rem; color:rgba(255,255,255,.55); font-size:.82rem; line-height:1.6; }
 .undo-button { display:grid; place-items:center; flex:0 0 auto; width:2rem; height:2rem; padding:0; border:1px solid rgba(255,255,255,.12); border-radius:999px; background:rgba(255,255,255,.07); color:#fff; }
 .undo-button:disabled { opacity:.28; cursor:default; }
 .undo-button:not(:disabled):hover { background:rgba(49,216,116,.13); border-color:rgba(49,216,116,.4); }
@@ -1079,6 +1085,12 @@ button:active:not(:disabled) { transform: scale(.97); }
     </div>
   </header>
 
+  <section id="syncNotice" class="sync-notice" role="alert" hidden>
+    <strong>Synchronisation interrompue</strong>
+    <p id="syncNoticeMessage"></p>
+    <button id="syncRetry" type="button" class="app-button app-button--ghost app-button--compact">Réessayer</button>
+  </section>
+
   <main id="homePage" class="pt-20 pb-24 max-w-5xl mx-auto px-4 space-y-10 overflow-auto" aria-label="Calendrier annuel" style="scroll-behavior: smooth;">
     <div id="appLoading" class="py-24 text-center text-sm text-white/50">Chargement de votre calendrier…</div>
   </main>
@@ -1406,6 +1418,6 @@ button:active:not(:disabled) { transform: scale(.97); }
   <script src="./dist/html2canvas-pro.min.js?v=20260803-1" defer
           onload="document.documentElement.dataset.pngExporter='ready'"
           onerror="document.documentElement.dataset.pngExporter='error'"></script>
-  <script type="module" src="./app.js?v=20260907-1"></script>
+  <script type="module" src="./app.js?v=20260909-2"></script>
 </body>
 </html>

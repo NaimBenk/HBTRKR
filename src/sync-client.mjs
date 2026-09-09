@@ -13,6 +13,8 @@ export class SyncClient {
         this.serverConfirmed = false;
         this.stopped = false;
         this.retryAttempt = 0;
+        this.readError = null;
+        this.writeError = null;
         const cached = this.read('cache');
         if(cached) this.receive(cached, false);
     }
@@ -52,11 +54,18 @@ export class SyncClient {
     status(){
         if(this.stopped) return;
         if(!this.online()) this.onStatus('offline');
-        else if(this.batches().length || this.inFlight) this.onStatus('saving');
+        else if(this.readError || this.writeError) this.onStatus('error', this.readError || this.writeError);
+        else if(this.batches().length) this.onStatus('saving');
         else this.onStatus(this.read('conflicts')?.length ? 'conflict' : this.serverConfirmed ? 'saved' : 'loading');
+    }
+    failRead(error){
+        if(this.stopped) return;
+        this.readError = error;
+        this.status();
     }
     receive(remote, confirmed = true){
         if(this.stopped) return;
+        if(confirmed) this.readError = null;
         if(this.remote && (remote._rev || 0) < (this.remote._rev || 0)){
             // The acknowledgement can arrive after a newer live snapshot. The
             // queue may have shrunk meanwhile; remove its optimistic overlay.
@@ -117,14 +126,14 @@ export class SyncClient {
         if(this.inFlight) return this.inFlight;
         clearTimeout(this.retryTimer);
         if(!this.online()){ this.status(); return Promise.resolve(false); }
-        this.inFlight = this.drain().finally(() => { this.inFlight = null; });
+        this.inFlight = this.drain().finally(() => { this.inFlight = null; this.status(); });
         return this.inFlight;
     }
     async drain(){
         try {
             let batch;
             while(!this.stopped && (batch = this.batches()[0])){
-                this.onStatus('saving');
+                this.status();
                 const watchdog = setTimeout(() => {
                     if(!this.stopped) this.onStatus(this.online() ? 'error' : 'offline', 'Le serveur tarde à répondre. Les changements restent enregistrés sur cet appareil.');
                 }, 15000);
@@ -132,6 +141,7 @@ export class SyncClient {
                 try { result = await this.send(batch); }
                 finally { clearTimeout(watchdog); }
                 if(this.stopped) return false;
+                this.writeError = null;
                 // Capture competing edits before rebasing the optimistic UI.
                 if(result.conflicts.length){
                     this.write('conflicts', [...(this.read('conflicts') || []), { batch, conflicts:result.conflicts }].slice(-20));
@@ -141,11 +151,12 @@ export class SyncClient {
                 this.receive(result.data, true);
             }
             this.retryAttempt = 0;
-            this.onStatus(this.online() ? (this.read('conflicts')?.length ? 'conflict' : this.serverConfirmed ? 'saved' : 'loading') : 'offline');
+            this.status();
             return true;
         } catch(error){
             if(this.stopped) return false;
-            this.onStatus(this.online() ? 'error' : 'offline', error);
+            this.writeError = error;
+            this.status();
             this.retryTimer = setTimeout(() => this.flush(), Math.min(30000, 1000 * 2 ** Math.min(this.retryAttempt++,5)));
             return false;
         }

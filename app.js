@@ -1,5 +1,6 @@
-import { SyncClient } from './src/sync-client.mjs?v=20260907-1';
+import { SyncClient } from './src/sync-client.mjs?v=20260909-2';
 import { SYNC_DOCUMENT, SYNC_VERSION, habitId, commitBatch, initializeDocument, equal } from './src/sync-model.mjs';
+import { syncErrorMessage } from './src/sync-errors.mjs';
 
 let initializeApp;
 let initializeFirestore, memoryLocalCache, doc, onSnapshot, runTransaction;
@@ -510,6 +511,7 @@ const fileInput = document.getElementById('fileInput');
 fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    if(!initialSynced){ fileInput.value = ''; showToast('Attends le chargement de tes données avant un import.', 'error'); return; }
 
     try {
     if(file.size > MAX_BACKUP_BYTES) throw new Error('backup-too-large');
@@ -565,6 +567,9 @@ window.addEventListener('appinstalled', () => {
 const appTitle = document.getElementById('appTitle');
 const syncStatus = document.getElementById('syncStatus');
 const syncStatusLabel = document.getElementById('syncStatusLabel');
+const syncNotice = document.getElementById('syncNotice');
+const syncNoticeMessage = document.getElementById('syncNoticeMessage');
+const syncRetry = document.getElementById('syncRetry');
 const homeModeControl = document.getElementById('homeModeControl');
 const homeModeToggle = document.getElementById('homeModeToggle');
 const undoButton = document.getElementById('undoButton');
@@ -795,11 +800,13 @@ document.addEventListener('keydown', (e)=>{
 });
 
 menuImport.onclick = () => {
+    if(!initialSynced) return;
     document.getElementById('fileInput').click();
     closeNavPanel();
 };
 
 menuExport.onclick = () => {
+    if(!initialSynced) return;
     const backup = createBackupPayload();
     const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
     const url=URL.createObjectURL(blob);
@@ -2153,6 +2160,14 @@ function updateUndoButton(){
     catch { undoButton.disabled = true; }
 }
 
+function showInitialSyncState(){
+    if(initialSynced || localPreviewMode) return;
+    dayPage.classList.add('hidden');
+    homePage.classList.remove('hidden');
+    if(homePage.querySelector('[data-sync-placeholder]')) return;
+    homePage.innerHTML = '<div data-sync-placeholder class="sync-placeholder"><h1>Connexion à tes données</h1><p>Ton calendrier s’affichera dès que ses données seront accessibles. Un échec de connexion ne signifie pas que tes habitudes ou tes tâches ont été supprimées.</p></div>';
+}
+
 function setSyncStatus(state, detail = ''){
     if(localPreviewMode) state = 'local';
     if(!syncStatus || !syncStatusLabel) return;
@@ -2170,6 +2185,14 @@ function setSyncStatus(state, detail = ''){
     };
     syncStatus.title = typeof detail === 'string' && detail ? detail : descriptions[state] || labels[state];
     syncStatus.setAttribute('aria-label', syncStatus.title);
+    const blocked = !initialSynced && !localPreviewMode;
+    addHabitBtn.disabled = blocked;
+    menuImport.disabled = blocked;
+    menuExport.disabled = blocked;
+    const showNotice = !localPreviewMode && (state === 'error' || (state === 'offline' && blocked));
+    syncNotice.hidden = !showNotice;
+    if(showNotice) syncNoticeMessage.textContent = syncStatus.title;
+    if(blocked) showInitialSyncState();
     updateUndoButton();
 }
 
@@ -2237,7 +2260,7 @@ document.addEventListener('keydown', event => {
 });
 syncStatus.addEventListener('click', () => {
     const conflicts = syncClient?.read('conflicts');
-    if(!conflicts?.length){ flushPersistence(); return; }
+    if(!conflicts?.length){ retrySynchronization(); return; }
     const blob = new Blob([JSON.stringify({ format:'HBTRK_SYNC_RECOVERY', conflicts }, null, 2)], { type:'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -2246,6 +2269,13 @@ syncStatus.addEventListener('click', () => {
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
+function retrySynchronization(){
+    if(!currentUser || localPreviewMode) return;
+    clearRealtimeSubscription();
+    ensureRealtimeSubscription();
+    flushPersistence();
+}
+syncRetry.addEventListener('click', retrySynchronization);
 
 let taskRolloverTimer = null;
 
@@ -2982,6 +3012,7 @@ if(mobileDayColor){
 }
 
 function showDayPage(dateKey){
+    if(!initialSynced && !localPreviewMode){ showInitialSyncState(); return; }
     if(!isValidDateKey(dateKey)) dateKey = formatDateKey(new Date());
     homePage.classList.add('hidden'); dayPage.classList.remove('hidden');
     const d=parseDateKey(dateKey);
@@ -3212,6 +3243,7 @@ function openYearModal(year){
 document.getElementById('closeYear').onclick=()=>{ yearModal.classList.add('hidden'); yearModal.classList.remove('flex'); };
 
 function goHome(){
+    if(!initialSynced && !localPreviewMode){ showInitialSyncState(); return; }
     if(homeRenderDirty) renderYears();
     homePage.classList.remove('hidden');
     dayPage.classList.add('hidden');
@@ -3223,6 +3255,7 @@ function goHome(){
 
 const modalAddHabit=document.getElementById('modalAddHabit');
 addHabitBtn.onclick = ()=>{
+    if(!initialSynced && !localPreviewMode) return;
     // reset champs de base
     document.getElementById('habitNameInput').value = '';
     document.getElementById('habitStartInput').value = new Date().toISOString().slice(0,10);
@@ -3409,6 +3442,7 @@ let lastIsSmall = null;
 let resizeTimer = null;
 
 function router(){
+    if(!initialSynced && !localPreviewMode){ showInitialSyncState(); return; }
     const hash = window.location.hash || '';
     const [, route, a] = hash.split('/');
     const small = isSmall();
@@ -3455,6 +3489,7 @@ bindOverlayClose(modalInstall, ()=>{ modalInstall.classList.add('hidden'); modal
 let app, db, docRef, unsubSnap, auth, currentUser;
 let snapshotRetryTimer = null;
 let snapshotRetryAttempt = 0;
+let snapshotGeneration = 0;
 
 const authModal   = document.getElementById('authModal');
 const authForm    = document.getElementById('authForm');
@@ -3704,6 +3739,7 @@ forgotPassword.onclick = async () => {
 
 
 function setAuthedUI(authed){
+    if(!authed) syncNotice.hidden = true;
     if (authed){
     hideAppForAuth(false);
     hideAuthModal();
@@ -3730,6 +3766,7 @@ function setAuthedUI(authed){
 }
 
 function clearRealtimeSubscription(){
+    snapshotGeneration++;
     clearTimeout(snapshotRetryTimer);
     snapshotRetryTimer = null;
     if(unsubSnap){
@@ -3770,7 +3807,7 @@ function createSyncClient(uid, send, storage = window.localStorage){
         onView:receiveSyncedView,
         onStatus:(state, error) => {
             if(error instanceof Error) console.error('sync error', error);
-            setSyncStatus(state, typeof error === 'string' ? error : '');
+            setSyncStatus(state, error ? syncErrorMessage(error, firebaseConfig.projectId) : '');
         },
         onConflict:() => {
             setSyncStatus('conflict');
@@ -3794,12 +3831,12 @@ function applyRealtimeSnapshot(snap){
     }
     if(!snap.exists()){
         if(initialSynced){
-            setSyncStatus('error', 'Les données serveur sont indisponibles. La copie locale est conservée.');
+            syncClient.failRead(new Error('sync-document-missing'));
         }
         return;
     }
     if(snap.data()._syncVersion !== SYNC_VERSION){
-        setSyncStatus('error', 'Une mise à jour de HBTRK est nécessaire.');
+        syncClient.failRead(new Error('unsupported-sync-version'));
         return;
     }
     syncClient.receive(snap.data(), true);
@@ -3810,15 +3847,16 @@ function applyRealtimeSnapshot(snap){
 function ensureRealtimeSubscription(){
     if(!currentUser || !docRef || unsubSnap) return;
     const subscribedRef = docRef, legacy = doc(db, 'users', currentUser.uid, 'data', 'fourpill');
+    const generation = snapshotGeneration;
     initializeSyncDocument(subscribedRef, legacy).then(value => {
-        if(docRef !== subscribedRef || !syncClient) return;
+        if(docRef !== subscribedRef || generation !== snapshotGeneration || !syncClient) return;
         syncClient.receive(value, true);
         processTaskRollovers();
         flushPersistence();
     }).catch(error => {
-        if(docRef !== subscribedRef) return;
+        if(docRef !== subscribedRef || generation !== snapshotGeneration) return;
         console.error('sync initialization error', error);
-        setSyncStatus(navigator.onLine ? 'error' : 'offline');
+        syncClient?.failRead(error);
         // Keep a retry path even when the listener itself stays open.
         clearTimeout(snapshotRetryTimer);
         snapshotRetryTimer = setTimeout(() => {
@@ -3827,15 +3865,15 @@ function ensureRealtimeSubscription(){
         }, 15000);
     });
     unsubSnap = onSnapshot(subscribedRef, { includeMetadataChanges:true }, snap => {
-        if(docRef !== subscribedRef) return;
+        if(docRef !== subscribedRef || generation !== snapshotGeneration) return;
         snapshotRetryAttempt = 0;
         try { applyRealtimeSnapshot(snap); }
-        catch(error){ console.error('snapshot error', error); setSyncStatus('error'); }
+        catch(error){ console.error('snapshot error', error); syncClient?.failRead(error); }
     }, error => {
-        if(docRef !== subscribedRef) return;
+        if(docRef !== subscribedRef || generation !== snapshotGeneration) return;
         console.error('onSnapshot error', error);
         unsubSnap = null;
-        setSyncStatus(navigator.onLine ? 'error' : 'offline');
+        syncClient?.failRead(error);
         scheduleRealtimeReconnect();
     });
 }
@@ -3867,7 +3905,7 @@ async function initFirebaseAll(){
         if(!currentUser){ setAuthedUI(false); return; }
         setAuthedUI(true);
         setSyncStatus(navigator.onLine ? 'loading' : 'offline');
-        homePage.innerHTML = '<div class="py-24 text-center text-sm text-white/50">Synchronisation de votre calendrier…</div>';
+        showInitialSyncState();
         const uid = currentUser.uid;
         const target = doc(db, 'users', uid, 'data', SYNC_DOCUMENT);
         docRef = target;

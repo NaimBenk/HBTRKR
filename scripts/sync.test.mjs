@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { SyncClient } from '../src/sync-client.mjs';
+import { syncErrorMessage } from '../src/sync-errors.mjs';
 import { applyChanges, changesBetween, inverseChanges, commitBatch, initializeDocument, habitId, clone, SYNC_DOCUMENT, SYNC_VERSION } from '../src/sync-model.mjs';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
@@ -287,4 +288,39 @@ test('Undo of deleted rollover remains an explicit restoration even if origin wa
 test('unusual imported ids do not collide with object prototype properties',()=>{
     const initial=base(),local=edit(initial,d=>d.tasks.push(task('toString'),task('__proto__')));
     assert.equal(merge(initial,initial,local).data.tasks.length,4);
+});
+
+test('permission denied during the first load never seeds or writes an empty calendar',async()=>{
+    const writes=[];
+    await assert.rejects(initializeDocument({target:'current',legacy:'legacy',marker:'migration',normalize,
+        run:callback=>callback({get:async()=>{throw Object.assign(new Error('blocked'),{code:'permission-denied'});},set:(...args)=>writes.push(args)})
+    }),{code:'permission-denied'});
+    assert.equal(writes.length,0);
+});
+
+test('listener permission error cannot turn into Saved when a timer flushes an empty queue',async()=>{
+    const server=new Server(),a=client(server);
+    a.failRead(Object.assign(new Error('blocked'),{code:'permission-denied'}));
+    await a.flush();a.status();
+    assert.equal(a.states.at(-1),'error');assert.deepEqual(a.view,server.value);
+    a.receive(server.value,false);assert.equal(a.states.at(-1),'error');
+    a.receive(server.value,true);assert.equal(a.states.at(-1),'saved');a.stop();
+});
+
+test('write permission failure preserves the journal until rules are corrected',async()=>{
+    const server=new Server();let allowed=false;
+    const a=client(server,{send:batch=>{
+        if(!allowed) throw Object.assign(new Error('blocked'),{code:'permission-denied'});
+        return server.send(batch);
+    }});
+    a.record(edit(a.view,d=>d.tasks[0].status='done'));await a.flush();
+    assert.equal(a.batches().length,1);assert.equal(a.view.tasks[0].status,'done');assert.equal(a.states.at(-1),'error');
+    a.receive(server.value,true);assert.equal(a.states.at(-1),'error');
+    allowed=true;await a.flush();assert.equal(server.value.tasks[0].status,'done');assert.equal(a.states.at(-1),'saved');a.stop();
+});
+
+test('permission denial identifies the right Firebase project, distinct from expired auth',()=>{
+    assert.match(syncErrorMessage({code:'permission-denied'},'habit-8d57f'),/habit-8d57f.*Firestore/);
+    assert.match(syncErrorMessage({code:'firestore/permission-denied'},'habit-8d57f'),/refuse/);
+    assert.match(syncErrorMessage({code:'unauthenticated'},'habit-8d57f'),/session Firebase/);
 });
