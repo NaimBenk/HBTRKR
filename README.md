@@ -27,6 +27,8 @@ npm run check
 
 Cette commande valide le JavaScript, exécute les tests de synchronisation et recompile le CSS Tailwind minifié.
 
+Elle teste aussi les rafraîchissements de l'interface : passage à minuit sans report de tâche, reprise d'un onglet suspendu, changement d'année, bouton Aujourd'hui, propagation des séries et records aux autres dates, et regroupement des mises à jour après plusieurs coches. Ces scénarios utilisent une horloge contrôlée, sans modifier l'heure du PC ni les données Firebase.
+
 ## Données
 
 Les habitudes, tâches, couleurs et complétions sont synchronisées avec Firebase pour l’utilisateur connecté. Le menu permet aussi d’exporter ou d’importer une sauvegarde JSON HBTRK.

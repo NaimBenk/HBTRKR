@@ -469,10 +469,9 @@ textInputModal?.addEventListener('click', event => {
     if(event.target === textInputModal) closeTextInputModal(null);
 });
 
-const caches = { bestStreak:new Map(), monthRate:new Map(), monthlyMax:new Map() };
-const clearAllCaches = ()=>{ caches.bestStreak.clear(); caches.monthRate.clear(); caches.monthlyMax.clear(); };
-const clearHabitCaches = (habitName)=>{ caches.bestStreak.delete(habitName); caches.monthlyMax.delete(habitName); for(const k of caches.monthRate.keys()){ if(k.startsWith(habitName+'|')) caches.monthRate.delete(k); } };
-const clearMonthCacheForHabit = (habitName, y, m)=>{ caches.monthRate.delete(`${habitName}|${y}-${m}`); caches.monthlyMax.delete(habitName); };
+const caches = { streaks:new Map(), bestStreak:new Map(), monthRate:new Map(), monthlyMax:new Map() };
+const clearAllCaches = ()=>{ for(const cache of Object.values(caches)) cache.clear(); };
+const clearHabitCaches = (habitName)=>{ caches.streaks.delete(habitName); caches.bestStreak.delete(habitName); caches.monthlyMax.delete(habitName); for(const k of caches.monthRate.keys()){ if(k.startsWith(habitName+'|')) caches.monthRate.delete(k); } };
 
 const homePage = document.getElementById('homePage');
 const yearsContainer = homePage;
@@ -575,7 +574,7 @@ const homeModeToggle = document.getElementById('homeModeToggle');
 const undoButton = document.getElementById('undoButton');
 
 let focusedDateKey = null;
-const now = new Date(); const currentYear = now.getFullYear(); const currentMonth = now.getMonth();
+const now = new Date(); let currentYear = now.getFullYear(); let currentMonth = now.getMonth();
 let mobileLandscapeLocked = false;
 let landscapeFullscreenOwned = false;
 let mobileDayMode = 'tasks';
@@ -589,6 +588,7 @@ const viewportIsSmall = () => window.matchMedia('(max-width: 639px)').matches;
 const isSmall = () => mobileLandscapeLocked || viewportIsSmall();
 
 const formatDateKey = (d)=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+let renderedTodayKey = formatDateKey(now);
 const parseDateKey = (s)=> new Date(s+'T00:00:00');
 const isValidDateKey = (value)=>{
     if(!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
@@ -845,44 +845,38 @@ closeInstall.onclick = () => {
     modalInstall.classList.remove('flex');
 };
 
-function computeStreakForHabit(habitName, asOfDateKey){
-    let d = parseDateKey(asOfDateKey);
-    let streak = 0;
-    const habit = data.habits.find(h=>h.name===habitName && isHabitActiveOn(h, asOfDateKey)) || data.habits.find(h=>h.name===habitName);
-    if(!habit) return 0;
-    const start = parseDateKey(habit.startDate);
-    while(d >= start){
-        const key = formatDateKey(d);
-        if(isHabitActiveOn(habit, key)){
-            if(isHabitDone(key, habitName)) streak++;
-            else break;
-        }
-        d.setDate(d.getDate()-1);
+function habitStreakHistory(habitName, throughDateKey){
+    const habit = data.habits.find(h=>h.name===habitName);
+    if(!habit) return null;
+    let history = caches.streaks.get(habitName);
+    if(!history){
+        history = { next:parseDateKey(habit.startDate), values:new Map(), current:0, best:0 };
+        caches.streaks.set(habitName, history);
     }
-    return streak;
+    const through = parseDateKey(throughDateKey);
+    // Each scheduled day is evaluated once per data revision, not once for
+    // every calendar cell/badge. Local dates also handle DST and rest days.
+    while(history.next <= through){
+        const key = formatDateKey(history.next);
+        if(isHabitActiveOn(habit, key)){
+            history.current = isHabitDone(key, habitName) ? history.current + 1 : 0;
+            history.best = Math.max(history.best, history.current);
+        }
+        history.values.set(key, history.current);
+        history.next.setDate(history.next.getDate() + 1);
+    }
+    return history;
+}
+
+function computeStreakForHabit(habitName, asOfDateKey){
+    return habitStreakHistory(habitName, asOfDateKey)?.values.get(asOfDateKey) || 0;
 }
 
 function computeBestStreakCached(habitName){
     if(caches.bestStreak.has(habitName)) return caches.bestStreak.get(habitName);
-    const habit = data.habits.find(h=>h.name===habitName); if(!habit) return 0;
     const keys = Object.keys(data.completions).sort();
     if(keys.length===0){ caches.bestStreak.set(habitName,0); return 0; }
-    const start = parseDateKey(habit.startDate);
-    const lastRecorded = parseDateKey(keys[keys.length-1]);
-    const today = parseDateKey(formatDateKey(new Date()));
-    const to = lastRecorded > today ? lastRecorded : today;
-    let best = 0;
-    let current = 0;
-    for(let d = new Date(start); d <= to; d.setDate(d.getDate()+1)){
-        const key = formatDateKey(d);
-        if(!isHabitActiveOn(habit, key)) continue;
-        if(isHabitDone(key, habitName)){
-            current++;
-            best = Math.max(best, current);
-        } else {
-            current = 0;
-        }
-    }
+    const best = habitStreakHistory(habitName, keys[keys.length-1])?.best || 0;
     caches.bestStreak.set(habitName,best); return best;
 }
 
@@ -1042,10 +1036,7 @@ function makeHomeMonthCard(y, m){
             btn.dataset.dateKey=dk;
             btn.setAttribute('aria-label', parseDateKey(dk).toLocaleDateString('fr-FR', { weekday:'long', day:'numeric', month:'long', year:'numeric' }));
             applyDayCellStyle(btn, dk);
-            if(dk===formatDateKey(new Date())){
-                btn.classList.add('is-today');
-                btn.setAttribute('aria-current', 'date');
-            }
+            syncCurrentDayMarker(btn, dk);
             btn.onclick=()=>openExpandedMonth(y,m,'tasks',dk);
             days.appendChild(btn);
         }
@@ -1100,7 +1091,7 @@ function rememberTaskRolloverSkip(task){
     if(!data.taskRolloverSkips[task.date].includes(rootId)) data.taskRolloverSkips[task.date].push(rootId);
 }
 
-function rollForwardLaterTasks(){
+function rollForwardLaterTasks(changedDates = null){
     const todayKey = formatDateKey(new Date());
     const occupiedTargets = new Set(data.tasks
         .filter(task => task.kind !== 'separator')
@@ -1131,6 +1122,7 @@ function rollForwardLaterTasks(){
         };
         data.tasks.push(copy);
         createdCopies.push(copy);
+        changedDates?.add(targetDate);
         occupiedTargets.add(targetKey);
         occupiedTargets.add(targetNameKey);
         created++;
@@ -1819,7 +1811,7 @@ function rerenderTaskViews(dateKey, { month = false } = {}){
 
 function decorateExpandedMonthDay(day, dateKey, mode){
     applyExpandedDayAppearance(day, dateKey, mode);
-    if(dateKey === formatDateKey(new Date())) day.classList.add('is-today');
+    syncCurrentDayMarker(day, dateKey);
     if(dateKey === expandedMonthFocusDateKey){
         day.classList.add('is-focused-day');
         day.tabIndex = -1;
@@ -2008,15 +2000,17 @@ function markHomeRenderDirty(){
     homeRenderDirty = true;
 }
 
-function refreshRenderedDayCells(fromDateKey = null){
+function refreshRenderedDayCells(fromDateKey = null, { completedOnly = false } = {}){
     const token = ++dayCellRefreshToken;
     const cells = Array.from(document.querySelectorAll('button.day-cell[data-date-key]'))
-        .filter(cell => !fromDateKey || cell.dataset.dateKey >= fromDateKey);
+        .filter(cell => (!fromDateKey || cell.dataset.dateKey >= fromDateKey)
+            && (!completedOnly || cell.classList.contains('gold') || Object.keys(data.completions[cell.dataset.dateKey] || {}).length));
     let index = 0;
     const renderBatch = () => {
         if(token !== dayCellRefreshToken || homePage.classList.contains('hidden')) return;
         const limit = Math.min(cells.length, index + 140);
-        while(index < limit){
+        const started = performance.now();
+        while(index < limit && (index === 0 || performance.now() - started < 6)){
             const cell = cells[index++];
             applyDayCellStyle(cell, cell.dataset.dateKey);
         }
@@ -2037,10 +2031,12 @@ function refreshHomeAfterHabitDefinitionChange(fromDateKey = null){
         return;
     }
     refreshExpandedHomeMonth();
-    refreshRenderedDayCells(fromDateKey);
+    // Archiving can lower a record and change gold on dates BEFORE the cut.
+    refreshRenderedDayCells();
 }
 
 function renderVisibleDataAfterFullChange({ remote = false } = {}){
+    refreshOpenSummaries();
     if(!dayPage.classList.contains('hidden') && focusedDateKey){
         markHomeRenderDirty();
         showDayPage(focusedDateKey);
@@ -2281,27 +2277,73 @@ let taskRolloverTimer = null;
 
 async function processTaskRollovers(){
     if(!syncClient?.view) return 0;
-    const created = rollForwardLaterTasks();
+    const changedDates = new Set();
+    const created = rollForwardLaterTasks(changedDates);
     if(!created) return 0;
-    if(focusedDateKey && !dayPage.classList.contains('hidden') && mobileDayMode === 'tasks'){
-        populateMobileTasks(focusedDateKey, dayHabitsList);
-        markHomeRenderDirty();
-    } else if(expandedMonthKey && expandedMonthMode === 'tasks'){
-        const [year, month] = expandedMonthKey.split('-').map(Number);
-        rerenderTaskViews(formatDateKey(new Date(year, month, 1)), { month:true });
-    }
+    // Only the receiving days gain content; preserve the other DOM nodes,
+    // horizontal scroll position and any task currently being edited.
+    changedDates.forEach(dateKey => rerenderTaskViews(dateKey));
     persistDebounced(0, { undoable:false });
     return created;
+}
+
+function syncCurrentDayMarker(element, dateKey, todayKey = formatDateKey(new Date())){
+    const current = dateKey === todayKey;
+    element.classList.toggle('is-today', current);
+    if(current) element.setAttribute('aria-current', 'date');
+    else element.removeAttribute('aria-current');
+}
+
+function syncDayNavigationState(){
+    if(!focusedDateKey) return;
+    const todayButton = document.getElementById('todayBtn');
+    const selected = focusedDateKey === formatDateKey(new Date());
+    dayPage.classList.toggle('is-current-day', selected);
+    todayButton.classList.toggle('is-selected-day', selected);
+    todayButton.setAttribute('aria-pressed', String(selected));
+    if(selected) todayButton.setAttribute('aria-current', 'date');
+    else todayButton.removeAttribute('aria-current');
+    // Resolve on click, not when this page was first opened before midnight.
+    todayButton.onclick = () => showDayPage(formatDateKey(new Date()));
+}
+
+function refreshCalendarDate(){
+    const current = new Date();
+    const todayKey = formatDateKey(current);
+    if(todayKey === renderedTodayKey) return false;
+    renderedTodayKey = todayKey;
+    currentYear = current.getFullYear();
+    currentMonth = current.getMonth();
+    const previousMaxYear = maxYear;
+    maxYear = Math.max(maxYear, currentYear + 5);
+    clearAllCaches();
+    if(!initialSynced && !localPreviewMode) return true;
+    if(maxYear > previousMaxYear){
+        const fragment = document.createDocumentFragment();
+        for(let year = previousMaxYear + 1; year <= maxYear; year++) ensureYearRendered(year, fragment);
+        yearsContainer.appendChild(fragment);
+    }
+    document.querySelectorAll('.month-task-card').forEach(card => {
+        card.classList.toggle('is-current-month', Number(card.dataset.year) === currentYear && Number(card.dataset.month) === currentMonth);
+    });
+    document.querySelectorAll('.day-cell[data-date-key], .compact-day[data-date-key]').forEach(day => {
+        syncCurrentDayMarker(day, day.dataset.dateKey, todayKey);
+        if(day.classList.contains('compact-day')) applyExpandedDayAppearance(day, day.dataset.dateKey);
+    });
+    // Keep the user's chosen date and scroll position; only "today" moves.
+    if(focusedDateKey){ applyMobileDayAppearance(focusedDateKey); syncDayNavigationState(); }
+    processTaskRollovers();
+    return true;
 }
 
 function scheduleTaskRollover(){
     clearTimeout(taskRolloverTimer);
     const nowDate = new Date();
-    const nextMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1, 0, 0, 2);
-    taskRolloverTimer = window.setTimeout(async () => {
-        await processTaskRollovers();
+    const nextMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() + 1);
+    taskRolloverTimer = window.setTimeout(() => {
+        refreshCalendarDate();
         scheduleTaskRollover();
-    }, Math.max(1000, nextMidnight.getTime() - nowDate.getTime()));
+    }, Math.max(50, Math.min(60000, nextMidnight.getTime() - nowDate.getTime() + 50)));
 }
 
 document.addEventListener('visibilitychange', () => {
@@ -2309,14 +2351,21 @@ document.addEventListener('visibilitychange', () => {
         flushPersistence();
         return;
     }
-    processTaskRollovers();
+    if(!refreshCalendarDate()) processTaskRollovers();
+    scheduleTaskRollover();
     ensureRealtimeSubscription();
     flushPersistence();
 });
 window.addEventListener('pagehide', () => { flushPersistence(); });
 window.addEventListener('pageshow', () => {
+    refreshCalendarDate();
+    scheduleTaskRollover();
     ensureRealtimeSubscription();
     flushPersistence();
+});
+window.addEventListener('focus', () => {
+    refreshCalendarDate();
+    scheduleTaskRollover();
 });
 window.addEventListener('online', () => {
     setSyncStatus('loading', 'Connexion retrouvée. Vérification du serveur…');
@@ -2349,6 +2398,11 @@ function syncHabitToggleButtonState(btn, h, dateKey, opts = {}){
     btn.classList.toggle('is-best-streak', isBestStreak);
     btn.dataset.bestStreak = String(isBestStreak);
     btn.setAttribute('aria-label', `${h.name}, ${done ? 'faite' : 'à faire'}${isBestStreak ? ', meilleure série en cours' : ''}. Appuyer pour ${done ? 'décocher' : 'cocher'}.`);
+    const badge = btn.closest('[data-habit-row]')?.querySelector('.streak-badge');
+    if(badge){
+        badge.textContent = `${clamp3(currentStreak)}/${clamp3(bestStreak)}`;
+        badge.classList.toggle('streak-badge--best', isBestStreak);
+    }
     if(isCompactMonth){
         const streak = btn.querySelector('.compact-habit-streak');
         if(streak) streak.textContent = `${clamp3(currentStreak)}/${clamp3(bestStreak)}`;
@@ -2360,13 +2414,37 @@ function syncHabitToggleButtonState(btn, h, dateKey, opts = {}){
     btn.classList.add(...(done ? doneClasses : pendingClasses));
 }
 
-function syncRenderedHabitState(h, dateKey){
+function syncRenderedHabitState(h){
     document.querySelectorAll('.habit-toggle-button').forEach(button => {
-        if(button.dataset.habitName !== h.name || button.dataset.dateKey !== dateKey) return;
-        syncHabitToggleButtonState(button, h, dateKey, {
+        if(button.dataset.habitName !== h.name) return;
+        syncHabitToggleButtonState(button, h, button.dataset.dateKey, {
             isCompactMonth:button.classList.contains('compact-habit'),
             isDayView:button.classList.contains('habit-day-button')
         });
+    });
+}
+
+const pendingHabitRefreshes = new Set();
+const pendingHabitMetricDates = new Set();
+let habitRefreshFrame = null;
+
+function scheduleHabitRefresh(habit, dateKey){
+    pendingHabitRefreshes.add(habit.id || habit.name);
+    pendingHabitMetricDates.add(dateKey);
+    if(habitRefreshFrame !== null) return;
+    habitRefreshFrame = requestAnimationFrame(() => {
+        habitRefreshFrame = null;
+        const habits = new Set(pendingHabitRefreshes);
+        const dates = new Set(pendingHabitMetricDates);
+        pendingHabitRefreshes.clear();
+        pendingHabitMetricDates.clear();
+        for(const h of data.habits){ if(habits.has(h.id || h.name)) syncRenderedHabitState(h); }
+        dates.forEach(refreshExpandedHabitMetrics);
+        // A changed personal best also changes gold on EARLIER days. This
+        // refresh is chunked and coalesced, never a full calendar replacement.
+        if(homePage.classList.contains('hidden')) markHomeRenderDirty();
+        else refreshRenderedDayCells(null, { completedOnly:true });
+        refreshOpenSummaries();
     });
 }
 
@@ -2399,11 +2477,9 @@ function makeHabitToggleButton(h, dateKey, onChanged, opts = {}) {
     if(row?.dataset.suppressClick === 'true') return;
     const done = isHabitDone(dateKey, h.name);
     setHabitStatus(dateKey, h.name, done ? HABIT_STATUS.PENDING : HABIT_STATUS.DONE);
-    const d = parseDateKey(dateKey);
-    clearMonthCacheForHabit(h.name, d.getFullYear(), d.getMonth());
     clearHabitCaches(h.name);
-    syncRenderedHabitState(h, dateKey);
-    refreshExpandedHabitMetrics(dateKey);
+    syncHabitToggleButtonState(btn, h, dateKey, opts);
+    scheduleHabitRefresh(h, dateKey);
     if (typeof onChanged === 'function') onChanged();
     updateDayCell(dateKey);
     persistDebounced();
@@ -2692,7 +2768,7 @@ function populateHabits(dateKey, container, minimal=false){
         row.dataset.habitName=h.name;
         const main=document.createElement('div');
         main.className='mobile-habit-main';
-        const button=makeHabitToggleButton(h, dateKey, isDayContainer ? null : rerenderSelf, { isDayView:isDayContainer });
+        const button=makeHabitToggleButton(h, dateKey, null, { isDayView:isDayContainer });
         main.appendChild(button);
         row.appendChild(main);
         const refreshEditedRow = () => {
@@ -2758,21 +2834,13 @@ function populateHabits(dateKey, container, minimal=false){
         left.appendChild(handle);
     }
 
-    let badge = null;
-    const refreshBadge = () => {
-        const current = computeStreakForHabit(h.name, dateKey);
-        const best = Math.max(h.bestStreak || 0, computeBestStreakCached(h.name));
-        const replacement = makeStreakBadge(current, best, current >= best);
-        badge?.replaceWith(replacement);
-        badge = replacement;
-    };
-    const toggleBtn=makeHabitToggleButton(h, dateKey, refreshBadge, { isDayView: isDayContainer });
+    const toggleBtn=makeHabitToggleButton(h, dateKey, null, { isDayView: isDayContainer });
     left.append(toggleBtn);
     row.append(left);
 
     const right=document.createElement('div'); right.className='flex items-center gap-2';
     const curLabel=computeStreakForHabit(h.name, dateKey); const bestLabel=Math.max(h.bestStreak||0, computeBestStreakCached(h.name));
-    badge=makeStreakBadge(curLabel, bestLabel, curLabel>=bestLabel);
+    const badge=makeStreakBadge(curLabel, bestLabel, curLabel>=bestLabel);
 
     if(container !== dayHabitsList){
         const edit=document.createElement('button');
@@ -3026,17 +3094,9 @@ function showDayPage(dateKey){
     syncMobileDayMode();
     if(mobileDayMode === 'tasks') populateMobileTasks(dateKey, dayHabitsList);
     else populateHabits(dateKey, dayHabitsList, true);
-    const todayKey = formatDateKey(new Date());
-    const todayButton = document.getElementById('todayBtn');
-    const isSelectedToday = dateKey === todayKey;
-    dayPage.classList.toggle('is-current-day', isSelectedToday);
-    todayButton.classList.toggle('is-selected-day', isSelectedToday);
-    todayButton.setAttribute('aria-pressed', String(isSelectedToday));
-    if(isSelectedToday) todayButton.setAttribute('aria-current', 'date');
-    else todayButton.removeAttribute('aria-current');
+    syncDayNavigationState();
     document.getElementById('prevDay').onclick=()=>{ const p=new Date(d); p.setDate(p.getDate()-1); showDayPage(formatDateKey(p)); };
     document.getElementById('nextDay').onclick=()=>{ const n=new Date(d); n.setDate(n.getDate()+1); showDayPage(formatDateKey(n)); };
-    todayButton.onclick=()=>showDayPage(todayKey);
     syncHomeModeControl();
     updateRouteHash(`#/day/${dateKey}`);
 }
@@ -3108,12 +3168,27 @@ appTitle.onclick = async ()=>{
     else showDayPage(focusedDateKey || formatDateKey(new Date()));
 };
 
-function openMonthModal(year, month){
+function refreshOpenSummaries(){
+    if(!monthModal.classList.contains('hidden') && monthModal.dataset.year){
+        const scrollTop = monthSummary.parentElement.scrollTop;
+        openMonthModal(Number(monthModal.dataset.year), Number(monthModal.dataset.month), { focus:false });
+        monthSummary.parentElement.scrollTop = scrollTop;
+    }
+    if(!yearModal.classList.contains('hidden') && yearModal.dataset.year){
+        const scrollTop = yearSummary.parentElement.scrollTop;
+        openYearModal(Number(yearModal.dataset.year), { focus:false });
+        yearSummary.parentElement.scrollTop = scrollTop;
+    }
+}
+
+function openMonthModal(year, month, { focus = true } = {}){
+    monthModal.dataset.year = year;
+    monthModal.dataset.month = month;
     monthSummary.innerHTML='';
     monthModal.classList.remove('hidden');
     monthModal.classList.add('flex');
     monthModalTitle.textContent = `${monthNameLong(month)} ${year}`;
-    requestAnimationFrame(()=>document.getElementById('closeMonth')?.focus({ preventScroll:true }));
+    if(focus) requestAnimationFrame(()=>document.getElementById('closeMonth')?.focus({ preventScroll:true }));
 
     const presentHabits = data.habits.filter(h=>{
     const dim = new Date(year, month+1, 0).getDate();
@@ -3175,12 +3250,13 @@ function openMonthModal(year, month){
 }
 document.getElementById('closeMonth').onclick=()=>{ monthModal.classList.add('hidden'); monthModal.classList.remove('flex'); };
 
-function openYearModal(year){
+function openYearModal(year, { focus = true } = {}){
+    yearModal.dataset.year = year;
     yearSummary.innerHTML='';
     yearModal.classList.remove('hidden');
     yearModal.classList.add('flex');
     yearModalTitle.textContent = `${year}`;
-    requestAnimationFrame(()=>document.getElementById('closeYear')?.focus({ preventScroll:true }));
+    if(focus) requestAnimationFrame(()=>document.getElementById('closeYear')?.focus({ preventScroll:true }));
 
     const habitsInYear = data.habits.filter(h=>{
     for(let m=0;m<12;m++){
@@ -3258,7 +3334,7 @@ addHabitBtn.onclick = ()=>{
     if(!initialSynced && !localPreviewMode) return;
     // reset champs de base
     document.getElementById('habitNameInput').value = '';
-    document.getElementById('habitStartInput').value = new Date().toISOString().slice(0,10);
+    document.getElementById('habitStartInput').value = formatDateKey(new Date());
 
     // weekly par défaut
     activateMode('weekly');
